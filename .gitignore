@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# JavaScript / frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Future crane-safety data and runtime evidence
+data/
+backend/storage/
+logs/
