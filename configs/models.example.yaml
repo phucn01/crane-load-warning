@@ -1,0 +1,27 @@
+# Copy this file to configs/models.local.yaml and replace the checkpoint paths.
+# Relative checkpoint paths are resolved from the directory containing this file.
+
+device: auto  # auto, cpu, cuda, cuda:0, or a GPU index
+
+rfdetr:
+  checkpoint: ../data/models/rfdetr_medium/checkpoint_best_total.pth
+  confidence: 0.25
+  num_classes: 2
+  class_names:
+    0: hanging_object
+    1: hanging_rope
+
+yolo_person:
+  # Download target. If absent, Ultralytics downloads the official asset once.
+  checkpoint: ../data/models/yolo26_medium/yolo26m-seg.pt
+  auto_download: true
+  confidence: 0.35
+  image_size: 640
+  person_class_id: 0
+  retina_masks: true
+
+depth_anything_v3:
+  model_name: depth-anything/DA3-BASE
+  process_resolution: 504
+  # Set true after the Hugging Face model is present in the local cache.
+  local_files_only: false

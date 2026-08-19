@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crane-load-warning-backend"
+version = "0.1.0"
+description = "Offline computer-vision pipeline for crane under-load safety"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    # depth-anything-3 0.1.1 imports addict but omits it from Requires-Dist.
+    "addict>=2.4",
+    "depth-anything-3>=0.1.1",
+    "numpy>=1.26",
+    "opencv-python>=4.10",
+    "Pillow>=10",
+    "PyYAML>=6.0",
+    "rfdetr>=1.9",
+    "torch>=2.2",
+    "ultralytics>=8.3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "ruff>=0.9"]
+
+[tool.setuptools.packages.find]
+where = ["packages"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"

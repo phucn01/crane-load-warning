@@ -224,5 +224,12 @@ frontend/.vite/
 
 # Future crane-safety data and runtime evidence
 data/
+outputs/
 backend/storage/
 logs/
+
+# Local model/configuration files and weights
+configs/models.local.yaml
+configs/*.local.yaml
+*.pt
+*.pth
