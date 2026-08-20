@@ -1,0 +1,40 @@
+# Copy this file to configs/geometry.local.yaml when tuning Phase-2 geometry.
+# All distances and depth tolerances are relative because the current depth map
+# is non-metric.
+
+representative_depth:
+  # Bottom portion of person-mask pixels used for the representative point.
+  person_bottom_fraction: 0.10
+  minimum_valid_pixels: 5
+  # Fraction removed from every side of the hanging-object bounding box.
+  load_inner_inset_fraction: 0.15
+
+load_anchors:
+  # Patch size must be an odd positive integer.
+  patch_size: 9
+  patch_stride: 4
+  seed_depth_tolerance: 0.10
+  minimum_valid_patch_fraction: 0.50
+
+connected_region:
+  neighbor_radius: 1
+  seed_depth_tolerance: 0.10
+  local_neighbor_depth_tolerance: 0.05
+
+farthest_point_sampling:
+  maximum_anchors: 16
+  minimum_distance: 0.0
+
+pseudo_bev:
+  lateral_scale: 1.0
+  longitudinal_scale: 1.0
+  minimum_depth: 0.000001
+
+zones:
+  # Warning buffers must be greater than or equal to danger buffers.
+  danger:
+    lateral: 0.15
+    longitudinal: 0.20
+  warning:
+    lateral: 0.30
+    longitudinal: 0.40
