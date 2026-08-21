@@ -29,10 +29,10 @@ pseudo_bev:
   minimum_depth: 0.000001
 
 zones:
-  # Warning buffers must be greater than or equal to danger buffers.
+  # Danger ratios expand the footprint; warning ratios then expand danger.
   danger:
-    lateral: 0.15
-    longitudinal: 0.20
+    lateral_ratio: 0.15
+    longitudinal_ratio: 0.20
   warning:
-    lateral: 0.30
-    longitudinal: 0.40
+    lateral_ratio: 0.30
+    longitudinal_ratio: 0.40

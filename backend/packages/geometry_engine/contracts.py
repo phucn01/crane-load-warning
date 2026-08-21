@@ -17,6 +17,60 @@ class ImagePoint:
 
 
 @dataclass(frozen=True, slots=True)
+class PseudoBEVPoint:
+    """A non-metric point in relative lateral/longitudinal coordinates."""
+
+    lateral: float
+    longitudinal: float
+
+
+@dataclass(frozen=True, slots=True)
+class PseudoBEVRectangle:
+    """Axis-aligned bounds in relative Pseudo-BEV coordinates."""
+
+    minimum_lateral: float
+    maximum_lateral: float
+    minimum_longitudinal: float
+    maximum_longitudinal: float
+
+    @property
+    def center_lateral(self) -> float:
+        return (self.minimum_lateral + self.maximum_lateral) / 2.0
+
+    @property
+    def center_longitudinal(self) -> float:
+        return (self.minimum_longitudinal + self.maximum_longitudinal) / 2.0
+
+    @property
+    def half_lateral(self) -> float:
+        return (self.maximum_lateral - self.minimum_lateral) / 2.0
+
+    @property
+    def half_longitudinal(self) -> float:
+        return (self.maximum_longitudinal - self.minimum_longitudinal) / 2.0
+
+    @property
+    def corners(self) -> tuple[PseudoBEVPoint, ...]:
+        """Return corners in clockwise order from the lower-left corner."""
+
+        return (
+            PseudoBEVPoint(self.minimum_lateral, self.minimum_longitudinal),
+            PseudoBEVPoint(self.minimum_lateral, self.maximum_longitudinal),
+            PseudoBEVPoint(self.maximum_lateral, self.maximum_longitudinal),
+            PseudoBEVPoint(self.maximum_lateral, self.minimum_longitudinal),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LoadSafetyZones:
+    """A load footprint and its nested danger and warning rectangles."""
+
+    footprint: PseudoBEVRectangle
+    danger: PseudoBEVRectangle
+    warning: PseudoBEVRectangle
+
+
+@dataclass(frozen=True, slots=True)
 class DepthStatistics:
     """Finite relative-depth statistics for one ROI."""
 
@@ -93,6 +147,9 @@ __all__ = [
     "ImagePoint",
     "LoadAnchorCandidate",
     "LoadAnchorCandidates",
+    "LoadSafetyZones",
     "PersonRepresentative",
+    "PseudoBEVPoint",
+    "PseudoBEVRectangle",
     "RepresentativeDepth",
 ]

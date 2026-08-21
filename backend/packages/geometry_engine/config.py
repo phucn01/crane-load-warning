@@ -144,41 +144,28 @@ class PseudoBEVConfig:
 
 @dataclass(frozen=True, slots=True)
 class ZoneBufferConfig:
-    """Relative expansion around a load footprint."""
+    """Per-axis expansion ratios relative to a load footprint half-size."""
 
-    lateral: float
-    longitudinal: float
+    lateral_ratio: float
+    longitudinal_ratio: float
 
     def __post_init__(self) -> None:
-        _require_non_negative("zone lateral buffer", self.lateral)
-        _require_non_negative("zone longitudinal buffer", self.longitudinal)
+        _require_non_negative("zone lateral ratio", self.lateral_ratio)
+        _require_non_negative("zone longitudinal ratio", self.longitudinal_ratio)
 
 
 @dataclass(frozen=True, slots=True)
 class ZonesConfig:
-    """Danger and warning zone expansion settings."""
+    """Sequential footprint-to-danger and danger-to-warning expansion ratios."""
 
     danger: ZoneBufferConfig = ZoneBufferConfig(
-        lateral=0.15,
-        longitudinal=0.20,
+        lateral_ratio=0.15,
+        longitudinal_ratio=0.20,
     )
     warning: ZoneBufferConfig = ZoneBufferConfig(
-        lateral=0.30,
-        longitudinal=0.40,
+        lateral_ratio=0.30,
+        longitudinal_ratio=0.40,
     )
-
-    def __post_init__(self) -> None:
-        if self.warning.lateral < self.danger.lateral:
-            raise ValueError(
-                "zones.warning.lateral must be greater than or equal to "
-                "zones.danger.lateral"
-            )
-        if self.warning.longitudinal < self.danger.longitudinal:
-            raise ValueError(
-                "zones.warning.longitudinal must be greater than or equal to "
-                "zones.danger.longitudinal"
-            )
-
 
 @dataclass(frozen=True, slots=True)
 class GeometryConfig:
@@ -246,31 +233,39 @@ def _parse_zones(payload: Mapping[str, Any]) -> ZonesConfig:
     _reject_unknown_keys(
         "zones.danger",
         danger_mapping,
-        {"lateral", "longitudinal"},
+        {"lateral_ratio", "longitudinal_ratio"},
     )
     _reject_unknown_keys(
         "zones.warning",
         warning_mapping,
-        {"lateral", "longitudinal"},
+        {"lateral_ratio", "longitudinal_ratio"},
     )
     return ZonesConfig(
         danger=ZoneBufferConfig(
-            lateral=float(danger_mapping.get("lateral", default_zones.danger.lateral)),
-            longitudinal=float(
+            lateral_ratio=float(
                 danger_mapping.get(
-                    "longitudinal",
-                    default_zones.danger.longitudinal,
+                    "lateral_ratio",
+                    default_zones.danger.lateral_ratio,
+                )
+            ),
+            longitudinal_ratio=float(
+                danger_mapping.get(
+                    "longitudinal_ratio",
+                    default_zones.danger.longitudinal_ratio,
                 )
             ),
         ),
         warning=ZoneBufferConfig(
-            lateral=float(
-                warning_mapping.get("lateral", default_zones.warning.lateral)
-            ),
-            longitudinal=float(
+            lateral_ratio=float(
                 warning_mapping.get(
-                    "longitudinal",
-                    default_zones.warning.longitudinal,
+                    "lateral_ratio",
+                    default_zones.warning.lateral_ratio,
+                )
+            ),
+            longitudinal_ratio=float(
+                warning_mapping.get(
+                    "longitudinal_ratio",
+                    default_zones.warning.longitudinal_ratio,
                 )
             ),
         ),
