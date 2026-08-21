@@ -6,19 +6,17 @@ representative_depth:
   # Bottom portion of person-mask pixels used for the representative point.
   person_bottom_fraction: 0.10
   minimum_valid_pixels: 5
-  # Fraction removed from every side of the hanging-object bounding box.
-  load_inner_inset_fraction: 0.15
+  # Centered ROI width and height as fractions of the load bounding box.
+  load_inner_size_fraction: 0.20
 
 load_anchors:
-  # Patch size must be an odd positive integer.
-  patch_size: 9
-  patch_stride: 4
-  seed_depth_tolerance: 0.10
-  minimum_valid_patch_fraction: 0.50
+  # Radius 5 px gives an 11x11 patch around each grid center.
+  patch_size: 11
+  patch_stride: 12
+  seed_depth_tolerance: 0.30
 
 connected_region:
   neighbor_radius: 1
-  seed_depth_tolerance: 0.10
   local_neighbor_depth_tolerance: 0.05
 
 farthest_point_sampling:

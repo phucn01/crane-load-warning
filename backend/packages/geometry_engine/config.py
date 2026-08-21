@@ -45,7 +45,7 @@ class RepresentativeDepthConfig:
 
     person_bottom_fraction: float = 0.10
     minimum_valid_pixels: int = 5
-    load_inner_inset_fraction: float = 0.15
+    load_inner_size_fraction: float = 0.20
 
     def __post_init__(self) -> None:
         _require_fraction(
@@ -58,9 +58,9 @@ class RepresentativeDepthConfig:
             self.minimum_valid_pixels,
         )
         _require_fraction(
-            "representative_depth.load_inner_inset_fraction",
-            self.load_inner_inset_fraction,
-            upper=0.5,
+            "representative_depth.load_inner_size_fraction",
+            self.load_inner_size_fraction,
+            allow_zero=False,
         )
 
 
@@ -68,10 +68,9 @@ class RepresentativeDepthConfig:
 class LoadAnchorsConfig:
     """Parameters for generating and filtering load candidate patches."""
 
-    patch_size: int = 9
-    patch_stride: int = 4
-    seed_depth_tolerance: float = 0.10
-    minimum_valid_patch_fraction: float = 0.50
+    patch_size: int = 11
+    patch_stride: int = 12
+    seed_depth_tolerance: float = 0.30
 
     def __post_init__(self) -> None:
         _require_positive_int("load_anchors.patch_size", self.patch_size)
@@ -82,29 +81,25 @@ class LoadAnchorsConfig:
             "load_anchors.seed_depth_tolerance",
             self.seed_depth_tolerance,
         )
-        _require_fraction(
-            "load_anchors.minimum_valid_patch_fraction",
-            self.minimum_valid_patch_fraction,
-            allow_zero=False,
-        )
+
+    @property
+    def patch_radius(self) -> int:
+        """Radius in pixels on either side of a patch center."""
+
+        return self.patch_size // 2
 
 
 @dataclass(frozen=True, slots=True)
 class ConnectedRegionConfig:
-    """Depth gates and neighborhood settings for region growing."""
+    """Local-depth and neighborhood settings for region growing."""
 
     neighbor_radius: int = 1
-    seed_depth_tolerance: float = 0.10
     local_neighbor_depth_tolerance: float = 0.05
 
     def __post_init__(self) -> None:
         _require_positive_int(
             "connected_region.neighbor_radius",
             self.neighbor_radius,
-        )
-        _require_non_negative(
-            "connected_region.seed_depth_tolerance",
-            self.seed_depth_tolerance,
         )
         _require_non_negative(
             "connected_region.local_neighbor_depth_tolerance",
@@ -233,8 +228,8 @@ def load_geometry_config(path: str | Path) -> GeometryConfig:
     """Read and validate a geometry YAML file."""
 
     config_path = Path(path)
-    with config_path.open("r", encoding="utf-8") as stream:
-        payload = yaml.safe_load(stream)
+    with config_path.open("r", encoding="utf-8") as config_file:
+        payload = yaml.safe_load(config_file)
 
     if payload is None:
         payload = {}
@@ -245,26 +240,38 @@ def load_geometry_config(path: str | Path) -> GeometryConfig:
 
 def _parse_zones(payload: Mapping[str, Any]) -> ZonesConfig:
     _reject_unknown_keys("zones", payload, {"danger", "warning"})
-    defaults = ZonesConfig()
-    danger = _section(payload, "danger")
-    warning = _section(payload, "warning")
-    _reject_unknown_keys("zones.danger", danger, {"lateral", "longitudinal"})
+    default_zones = ZonesConfig()
+    danger_mapping = _section(payload, "danger")
+    warning_mapping = _section(payload, "warning")
+    _reject_unknown_keys(
+        "zones.danger",
+        danger_mapping,
+        {"lateral", "longitudinal"},
+    )
     _reject_unknown_keys(
         "zones.warning",
-        warning,
+        warning_mapping,
         {"lateral", "longitudinal"},
     )
     return ZonesConfig(
         danger=ZoneBufferConfig(
-            lateral=float(danger.get("lateral", defaults.danger.lateral)),
+            lateral=float(danger_mapping.get("lateral", default_zones.danger.lateral)),
             longitudinal=float(
-                danger.get("longitudinal", defaults.danger.longitudinal)
+                danger_mapping.get(
+                    "longitudinal",
+                    default_zones.danger.longitudinal,
+                )
             ),
         ),
         warning=ZoneBufferConfig(
-            lateral=float(warning.get("lateral", defaults.warning.lateral)),
+            lateral=float(
+                warning_mapping.get("lateral", default_zones.warning.lateral)
+            ),
             longitudinal=float(
-                warning.get("longitudinal", defaults.warning.longitudinal)
+                warning_mapping.get(
+                    "longitudinal",
+                    default_zones.warning.longitudinal,
+                )
             ),
         ),
     )
@@ -282,12 +289,12 @@ def _section(payload: Mapping[str, Any], key: str) -> Mapping[str, Any]:
 def _reject_unknown_keys(
     section_name: str,
     payload: Mapping[str, Any],
-    allowed: set[str],
+    allowed_keys: set[str],
 ) -> None:
-    unknown = sorted(str(key) for key in payload if key not in allowed)
-    if unknown:
-        names = ", ".join(unknown)
-        raise ValueError(f"unknown keys in {section_name}: {names}")
+    unknown_keys = sorted(str(key) for key in payload if key not in allowed_keys)
+    if unknown_keys:
+        unknown_key_names = ", ".join(unknown_keys)
+        raise ValueError(f"unknown keys in {section_name}: {unknown_key_names}")
 
 
 __all__ = [

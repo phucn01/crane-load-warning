@@ -54,10 +54,45 @@ class PersonRepresentative:
     depth: RepresentativeDepth
 
 
+@dataclass(frozen=True, slots=True)
+class LoadAnchorCandidate:
+    """One valid-depth patch sampled inside a hanging-object bbox."""
+
+    candidate_id: str
+    grid_x: int
+    grid_y: int
+    point: ImagePoint
+    patch_bbox: tuple[int, int, int, int]
+    depth: float
+    valid_depth_count: int
+    valid_depth_fraction: float
+    seed_depth_difference: float | None = None
+    is_seed_consistent: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class LoadAnchorCandidates:
+    """Candidate generation and seed-depth filtering result for one load."""
+
+    seed_depth: float | None
+    seed_source: str
+    generated_patch_count: int
+    rejected_invalid_depth_count: int
+    candidates: tuple[LoadAnchorCandidate, ...]
+
+    @property
+    def consistent_candidates(self) -> tuple[LoadAnchorCandidate, ...]:
+        return tuple(
+            candidate for candidate in self.candidates if candidate.is_seed_consistent
+        )
+
+
 __all__ = [
     "DepthQuality",
     "DepthStatistics",
     "ImagePoint",
+    "LoadAnchorCandidate",
+    "LoadAnchorCandidates",
     "PersonRepresentative",
     "RepresentativeDepth",
 ]

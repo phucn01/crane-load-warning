@@ -37,20 +37,20 @@ def estimate_person_representative(
     _validate_detection_class(detection, "person")
     _validate_depth_map(depth_map)
 
-    point, point_source = person_representative_point(
+    representative_point, representative_point_source = person_representative_point(
         detection,
         image_shape=depth_map.shape,
         bottom_fraction=settings.person_bottom_fraction,
     )
-    depth = person_representative_depth(
+    representative_depth = person_representative_depth(
         detection,
         depth_map,
         minimum_valid_pixels=settings.minimum_valid_pixels,
     )
     return PersonRepresentative(
-        point=point,
-        point_source=point_source,
-        depth=depth,
+        point=representative_point,
+        point_source=representative_point_source,
+        depth=representative_depth,
     )
 
 
@@ -69,13 +69,16 @@ def person_representative_point(
     mask = _valid_detection_mask(detection, image_shape)
     if mask is not None:
         ys, xs = np.nonzero(mask)
-        cutoff = np.percentile(ys, 100.0 * (1.0 - bottom_fraction))
-        selected = ys >= cutoff
-        if np.any(selected):
+        bottom_band_y_cutoff = np.percentile(
+            ys,
+            100.0 * (1.0 - bottom_fraction),
+        )
+        bottom_band_mask = ys >= bottom_band_y_cutoff
+        if np.any(bottom_band_mask):
             return (
                 ImagePoint(
-                    x=float(np.median(xs[selected])),
-                    y=float(np.median(ys[selected])),
+                    x=float(np.median(xs[bottom_band_mask])),
+                    y=float(np.median(ys[bottom_band_mask])),
                 ),
                 "segmentation_bottom_band",
             )
@@ -108,61 +111,69 @@ def person_representative_depth(
     bbox = _required_bbox(detection, depth_map.shape)
     mask = _valid_detection_mask(detection, depth_map.shape)
     base_source = "segmentation_mask" if mask is not None else "bbox_fallback"
-    base_region = mask if mask is not None else _bbox_region(depth_map.shape, bbox)
+    detection_region_mask = (
+        mask if mask is not None else _bbox_region(depth_map.shape, bbox)
+    )
 
-    regions = {
-        "full": base_region,
-        "top": base_region
+    roi_masks = {
+        "full": detection_region_mask,
+        "top": detection_region_mask
         & _bbox_region(depth_map.shape, _top_bbox(bbox, PERSON_TOP_FRACTION)),
-        "lower": base_region
+        "lower": detection_region_mask
         & _bbox_region(depth_map.shape, _bottom_bbox(bbox, PERSON_LOWER_FRACTION)),
-        "foot": base_region
+        "foot": detection_region_mask
         & _bbox_region(depth_map.shape, _bottom_bbox(bbox, PERSON_FOOT_FRACTION)),
     }
-    statistics = {
+    roi_statistics = {
         name: calculate_depth_statistics(
             depth_map[region],
             minimum_valid_pixels=minimum_valid_pixels,
         )
-        for name, region in regions.items()
+        for name, region in roi_masks.items()
     }
 
-    full = statistics["full"].median
-    top = statistics["top"].median
-    lower = statistics["lower"].median
-    difference = relative_depth_difference(top, lower)
+    full_depth = roi_statistics["full"].median
+    top_depth = roi_statistics["top"].median
+    lower_depth = roi_statistics["lower"].median
+    top_lower_depth_difference = relative_depth_difference(top_depth, lower_depth)
 
-    selected: float | None
-    selected_roi: str
+    selected_depth: float | None
+    selected_roi_name: str
     quality: DepthQuality
-    if difference is not None and difference <= HIGH_QUALITY_DIFFERENCE:
-        selected = lower
-        selected_roi = "lower"
+    if (
+        top_lower_depth_difference is not None
+        and top_lower_depth_difference <= HIGH_QUALITY_DIFFERENCE
+    ):
+        selected_depth = lower_depth
+        selected_roi_name = "lower"
         quality = "high"
-    elif difference is not None and difference <= MEDIUM_QUALITY_DIFFERENCE:
-        selected = _finite_median((full, top, lower))
-        selected_roi = "full_top_lower_median"
+    elif (
+        top_lower_depth_difference is not None
+        and top_lower_depth_difference <= MEDIUM_QUALITY_DIFFERENCE
+    ):
+        selected_depth = _finite_median((full_depth, top_depth, lower_depth))
+        selected_roi_name = "full_top_lower_median"
         quality = "medium"
     else:
-        selected = full
-        selected_roi = "full"
+        selected_depth = full_depth
+        selected_roi_name = "full"
         quality = "low"
 
-    if selected is None:
-        selected, selected_roi = _first_valid_roi(
-            statistics,
+    if selected_depth is None:
+        selected_depth, selected_roi_name = _first_valid_roi(
+            roi_statistics,
             order=("full", "top", "lower", "foot"),
         )
-    if selected is None:
+    if selected_depth is None:
         quality = "unavailable"
-        selected_roi = "unavailable"
+        selected_roi_name = "unavailable"
 
     return RepresentativeDepth(
-        value=selected,
-        source=f"{base_source}:{selected_roi}",
+        value=selected_depth,
+        source=f"{base_source}:{selected_roi_name}",
         quality=quality,
-        roi_statistics=statistics,
-        top_lower_relative_difference=difference,
+        roi_statistics=roi_statistics,
+        top_lower_relative_difference=top_lower_depth_difference,
     )
 
 
@@ -178,9 +189,9 @@ def load_representative_depth(
     _validate_detection_class(detection, "hanging_object")
     _validate_depth_map(depth_map)
     bbox = _required_bbox(detection, depth_map.shape)
-    inner_bbox = _inset_bbox(bbox, settings.load_inner_inset_fraction)
+    inner_bbox = _centered_bbox(bbox, settings.load_inner_size_fraction)
 
-    statistics = {
+    roi_statistics = {
         "inner": calculate_depth_statistics(
             _depth_roi(depth_map, inner_bbox),
             minimum_valid_pixels=settings.minimum_valid_pixels,
@@ -190,17 +201,20 @@ def load_representative_depth(
             minimum_valid_pixels=settings.minimum_valid_pixels,
         ),
     }
-    value, source = _first_valid_roi(statistics, order=("inner", "full"))
-    quality: DepthQuality = "high" if source == "inner" else "low"
-    if value is None:
-        source = "unavailable"
+    selected_depth, selected_roi_name = _first_valid_roi(
+        roi_statistics,
+        order=("inner", "full"),
+    )
+    quality: DepthQuality = "high" if selected_roi_name == "inner" else "low"
+    if selected_depth is None:
+        selected_roi_name = "unavailable"
         quality = "unavailable"
 
     return RepresentativeDepth(
-        value=value,
-        source=source,
+        value=selected_depth,
+        source=selected_roi_name,
         quality=quality,
-        roi_statistics=statistics,
+        roi_statistics=roi_statistics,
     )
 
 
@@ -215,21 +229,21 @@ def calculate_depth_statistics(
     if values is None:
         return DepthStatistics(valid_count=0)
 
-    finite = np.asarray(values, dtype=np.float32)
-    finite = finite[np.isfinite(finite)]
-    count = int(finite.size)
-    if count < minimum_valid_pixels:
-        return DepthStatistics(valid_count=count)
+    finite_values = np.asarray(values, dtype=np.float32)
+    finite_values = finite_values[np.isfinite(finite_values)]
+    valid_value_count = int(finite_values.size)
+    if valid_value_count < minimum_valid_pixels:
+        return DepthStatistics(valid_count=valid_value_count)
 
     return DepthStatistics(
-        valid_count=count,
-        mean=float(np.mean(finite)),
-        median=float(np.median(finite)),
-        minimum=float(np.min(finite)),
-        maximum=float(np.max(finite)),
-        percentile_10=float(np.percentile(finite, 10)),
-        percentile_90=float(np.percentile(finite, 90)),
-        standard_deviation=float(np.std(finite)),
+        valid_count=valid_value_count,
+        mean=float(np.mean(finite_values)),
+        median=float(np.median(finite_values)),
+        minimum=float(np.min(finite_values)),
+        maximum=float(np.max(finite_values)),
+        percentile_10=float(np.percentile(finite_values, 10)),
+        percentile_90=float(np.percentile(finite_values, 90)),
+        standard_deviation=float(np.std(finite_values)),
     )
 
 
@@ -253,11 +267,14 @@ def _valid_detection_mask(
     detection: Detection,
     image_shape: tuple[int, ...],
 ) -> NDArray[np.bool_] | None:
-    mask = detection["mask"]
-    target_shape = tuple(image_shape[:2])
-    if not isinstance(mask, np.ndarray) or mask.shape != target_shape:
+    detection_mask = detection["mask"]
+    expected_mask_shape = tuple(image_shape[:2])
+    if (
+        not isinstance(detection_mask, np.ndarray)
+        or detection_mask.shape != expected_mask_shape
+    ):
         return None
-    boolean_mask = np.asarray(mask, dtype=bool)
+    boolean_mask = np.asarray(detection_mask, dtype=bool)
     return boolean_mask if np.any(boolean_mask) else None
 
 
@@ -277,10 +294,10 @@ def _bbox_region(
 ) -> NDArray[np.bool_]:
     height, width = image_shape[:2]
     x1, y1, x2, y2 = _integer_bbox(bbox, image_shape)
-    region = np.zeros((height, width), dtype=bool)
+    bbox_mask = np.zeros((height, width), dtype=bool)
     if x2 > x1 and y2 > y1:
-        region[y1:y2, x1:x2] = True
-    return region
+        bbox_mask[y1:y2, x1:x2] = True
+    return bbox_mask
 
 
 def _depth_roi(
@@ -288,8 +305,8 @@ def _depth_roi(
     bbox: tuple[float, float, float, float],
 ) -> NDArray[np.generic] | None:
     x1, y1, x2, y2 = _integer_bbox(bbox, depth_map.shape)
-    roi = depth_map[y1:y2, x1:x2]
-    return roi if roi.size else None
+    depth_roi = depth_map[y1:y2, x1:x2]
+    return depth_roi if depth_roi.size else None
 
 
 def _integer_bbox(
@@ -323,31 +340,38 @@ def _bottom_bbox(
     return x1, y2 - (y2 - y1) * fraction, x2, y2
 
 
-def _inset_bbox(
+def _centered_bbox(
     bbox: tuple[float, float, float, float],
-    inset_fraction: float,
+    size_fraction: float,
 ) -> tuple[float, float, float, float]:
     x1, y1, x2, y2 = bbox
-    inset_x = (x2 - x1) * inset_fraction
-    inset_y = (y2 - y1) * inset_fraction
-    return x1 + inset_x, y1 + inset_y, x2 - inset_x, y2 - inset_y
+    center_x = (x1 + x2) / 2.0
+    center_y = (y1 + y2) / 2.0
+    half_width = (x2 - x1) * size_fraction / 2.0
+    half_height = (y2 - y1) * size_fraction / 2.0
+    return (
+        center_x - half_width,
+        center_y - half_height,
+        center_x + half_width,
+        center_y + half_height,
+    )
 
 
 def _first_valid_roi(
-    statistics: dict[str, DepthStatistics],
+    roi_statistics: dict[str, DepthStatistics],
     *,
     order: tuple[str, ...],
 ) -> tuple[float | None, str]:
-    for name in order:
-        value = statistics[name].median
-        if value is not None:
-            return value, name
+    for roi_name in order:
+        median_depth = roi_statistics[roi_name].median
+        if median_depth is not None:
+            return median_depth, roi_name
     return None, "unavailable"
 
 
 def _finite_median(values: Iterable[float | None]) -> float | None:
-    finite = [float(value) for value in values if _is_finite(value)]
-    return float(np.median(finite)) if finite else None
+    finite_values = [float(value) for value in values if _is_finite(value)]
+    return float(np.median(finite_values)) if finite_values else None
 
 
 def _is_finite(value: Any) -> bool:

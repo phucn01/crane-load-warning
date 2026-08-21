@@ -7,17 +7,18 @@ from geometry_engine.representative_depth import (
 )
 
 
-def make_detection(class_name: str, mask=None):
+def make_detection(class_name: str, mask=None, bbox=(0.0, 0.0, 10.0, 10.0)):
+    x1, y1, x2, y2 = bbox
     return {
         "source_model": "test",
         "class_id": 0,
         "class_name": class_name,
         "confidence": 0.9,
-        "bbox": (0.0, 0.0, 10.0, 10.0),
-        "x1": 0.0,
-        "y1": 0.0,
-        "x2": 10.0,
-        "y2": 10.0,
+        "bbox": bbox,
+        "x1": x1,
+        "y1": y1,
+        "x2": x2,
+        "y2": y2,
         "mask": mask,
     }
 
@@ -76,13 +77,16 @@ def test_person_depth_falls_back_to_full_bbox_when_mask_is_invalid():
 
 
 def test_load_depth_prefers_inner_roi_then_falls_back_to_full_bbox():
-    detection = make_detection("hanging_object")
-    config = RepresentativeDepthConfig(
-        minimum_valid_pixels=5,
-        load_inner_inset_fraction=0.20,
+    detection = make_detection(
+        "hanging_object",
+        bbox=(0.0, 0.0, 20.0, 20.0),
     )
-    depth = np.ones((10, 10), dtype=np.float32)
-    depth[2:8, 2:8] = 4.0
+    config = RepresentativeDepthConfig(
+        minimum_valid_pixels=4,
+        load_inner_size_fraction=0.10,
+    )
+    depth = np.ones((20, 20), dtype=np.float32)
+    depth[9:11, 9:11] = 4.0
 
     inner = load_representative_depth(detection, depth, config=config)
 
@@ -90,7 +94,7 @@ def test_load_depth_prefers_inner_roi_then_falls_back_to_full_bbox():
     assert inner.source == "inner"
     assert inner.quality == "high"
 
-    depth[2:8, 2:8] = np.nan
+    depth[9:11, 9:11] = np.nan
     fallback = load_representative_depth(detection, depth, config=config)
 
     assert fallback.value == 1.0
