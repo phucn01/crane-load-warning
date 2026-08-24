@@ -1,0 +1,15 @@
+# Risk is computed only from 2D geometry. No depth input is consumed.
+evaluation:
+  minimum_person_confidence: 0.35
+  boundary_epsilon: 1.0e-9
+  # Missing/unreliable geometry must never create a new SAFE assessment.
+  unreliable_fallback_level: WARNING
+
+# Applied to video frames. A single uploaded image returns its immediate frame
+# assessment and does not create a temporal event.
+events:
+  warning_enter_frames: 2
+  danger_enter_frames: 3
+  exit_confirmation_seconds: 1.5
+  grace_period_seconds: 0.5
+  cooldown_seconds: 5.0

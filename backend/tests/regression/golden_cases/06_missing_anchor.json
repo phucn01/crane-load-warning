@@ -1,0 +1,1 @@
+{"load_id":"load-1","person":{"id":"person-1","anchor":null,"confidence":0.9},"zones":{"danger":{"minimum_x":25,"maximum_x":75,"minimum_y":25,"maximum_y":75},"warning":{"minimum_x":0,"maximum_x":100,"minimum_y":0,"maximum_y":100}},"expected":{"level":"WARNING","assessment_reliable":false}}
