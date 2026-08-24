@@ -55,26 +55,40 @@ def test_evaluates_nested_zones(anchor: Point2D, expected: RiskLevel, zones):
     assert assessment.assessment_reliable is True
 
 
-def test_unreliable_input_never_creates_a_safe_assessment(zones):
+def test_missing_person_anchor_is_safe_with_quality_diagnostics(zones):
     assessment = RiskEvaluator().evaluate(
         PersonObservation("person-1", None, confidence=0.9),
         load_id="load-1",
         zones=zones,
     )
 
-    assert assessment.level is RiskLevel.WARNING
+    assert assessment.level is RiskLevel.SAFE
     assert assessment.assessment_reliable is False
     assert assessment.quality_reasons == ("missing_person_anchor",)
 
 
-def test_low_confidence_preserves_a_geometric_danger(zones):
+def test_missing_zone_geometry_is_safe_with_quality_diagnostics():
+    assessment = RiskEvaluator().evaluate(
+        PersonObservation("person-1", Point2D(50.0, 50.0), confidence=0.9),
+        load_id="load-1",
+        zones=None,
+    )
+
+    assert assessment.level is RiskLevel.SAFE
+    assert assessment.matched_zone is None
+    assert assessment.assessment_reliable is False
+    assert assessment.quality_reasons == ("missing_zone_geometry",)
+
+
+def test_low_confidence_geometric_danger_is_reported_as_safe(zones):
     assessment = RiskEvaluator().evaluate(
         PersonObservation("person-1", Point2D(50.0, 50.0), confidence=0.1),
         load_id="load-1",
         zones=zones,
     )
 
-    assert assessment.level is RiskLevel.DANGER
+    assert assessment.level is RiskLevel.SAFE
+    assert assessment.assessment_reliable is False
     assert assessment.matched_zone is RiskLevel.DANGER
     assert assessment.quality_reasons == ("low_person_confidence",)
 

@@ -2,8 +2,7 @@
 evaluation:
   minimum_person_confidence: 0.35
   boundary_epsilon: 1.0e-9
-  # Missing/unreliable geometry must never create a new SAFE assessment.
-  unreliable_fallback_level: WARNING
+  # Missing or unreliable person/zone data produces SAFE with quality diagnostics.
 
 # Applied to video frames. A single uploaded image returns its immediate frame
 # assessment and does not create a temporal event.

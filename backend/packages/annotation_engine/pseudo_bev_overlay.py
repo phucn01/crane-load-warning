@@ -84,7 +84,7 @@ def render_pseudo_bev_overlay(
         point = person.pseudo_bev_point
         if point is None:
             continue
-        level = person_levels.get(person.person_id, RiskLevel.WARNING)
+        level = person_levels.get(person.person_id, assessment.level)
         pixel = viewport.project(point)
         risk_color = RISK_COLORS_BGR[level]
         cv2.circle(canvas, pixel, 7, PERSON_BGR, -1, cv2.LINE_AA)
@@ -156,7 +156,7 @@ def draw_pseudo_bev_chart(
         point = person.pseudo_bev_point
         if point is None:
             continue
-        level = person_levels.get(person.person_id, RiskLevel.WARNING)
+        level = person_levels.get(person.person_id, assessment.level)
         risk_color = RISK_COLORS_HEX[level]
         axis.scatter(
             [point.lateral],

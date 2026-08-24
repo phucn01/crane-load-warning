@@ -33,7 +33,7 @@ def aggregate_frame_risk(
     if not pair_assessments:
         return FrameRiskAssessment(
             frame_id=frame_id,
-            level=RiskLevel.WARNING,
+            level=RiskLevel.SAFE,
             assessment_reliable=False,
             quality_reasons=("no_risk_assessments",),
             pair_assessments=(),

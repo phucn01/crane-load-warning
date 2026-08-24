@@ -32,13 +32,10 @@ def _positive_int(name: str, value: int) -> None:
 class EvaluationPolicy:
     minimum_person_confidence: float = 0.35
     boundary_epsilon: float = 1e-9
-    unreliable_fallback_level: RiskLevel = RiskLevel.WARNING
 
     def __post_init__(self) -> None:
         _fraction("evaluation.minimum_person_confidence", self.minimum_person_confidence)
         _non_negative("evaluation.boundary_epsilon", self.boundary_epsilon)
-        if self.unreliable_fallback_level is RiskLevel.SAFE:
-            raise ValueError("unreliable_fallback_level cannot be SAFE")
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +74,7 @@ class RiskPolicy:
         _reject_unknown(
             "evaluation",
             evaluation,
-            {"minimum_person_confidence", "boundary_epsilon", "unreliable_fallback_level"},
+            {"minimum_person_confidence", "boundary_epsilon"},
         )
         _reject_unknown(
             "events",
@@ -91,14 +88,6 @@ class RiskPolicy:
             },
         )
         default = cls()
-        fallback = evaluation.get(
-            "unreliable_fallback_level",
-            default.evaluation.unreliable_fallback_level.value,
-        )
-        try:
-            fallback_level = RiskLevel(str(fallback).upper())
-        except ValueError as error:
-            raise ValueError(f"invalid unreliable_fallback_level: {fallback}") from error
         return cls(
             evaluation=EvaluationPolicy(
                 minimum_person_confidence=float(
@@ -110,7 +99,6 @@ class RiskPolicy:
                 boundary_epsilon=float(
                     evaluation.get("boundary_epsilon", default.evaluation.boundary_epsilon)
                 ),
-                unreliable_fallback_level=fallback_level,
             ),
             events=EventPolicy(
                 warning_enter_frames=int(

@@ -69,6 +69,28 @@ def test_risk_color_is_applied_to_person_but_not_load(
     assert _near(output[100, 90], CLASS_COLORS_BGR["hanging_object"])
 
 
+def test_pairless_safe_frame_marks_detected_person_as_safe(
+    annotation_bundle: AnnotationBundle,
+):
+    assessment = replace(
+        annotation_bundle.risk_result.assessment,
+        level=RiskLevel.SAFE,
+        assessment_reliable=False,
+        quality_reasons=("no_risk_assessments",),
+        pair_assessments=(),
+        contributing_person_ids=(),
+        contributing_load_ids=(),
+    )
+
+    output = render_image_overlay(
+        annotation_bundle.image_bgr,
+        annotation_bundle.detections,
+        assessment,
+    )
+
+    assert _near(output[100, 30], RISK_COLORS_BGR[RiskLevel.SAFE])
+
+
 def test_rejects_invalid_camera_image(annotation_bundle: AnnotationBundle):
     with pytest.raises(ValueError, match="shape"):
         render_image_overlay(

@@ -101,10 +101,10 @@ def test_video_mode_confirms_one_scene_event_across_frames():
     assert second.event.alert_triggered is True
 
 
-def test_empty_frame_is_unreliable_warning_instead_of_safe():
+def test_empty_frame_is_safe_with_explicit_quality_diagnostics():
     result = RiskFramePipeline().process((), context=image_context())
 
-    assert result.assessment.level is RiskLevel.WARNING
+    assert result.assessment.level is RiskLevel.SAFE
     assert result.assessment.assessment_reliable is False
     assert result.assessment.quality_reasons == ("no_risk_assessments",)
 

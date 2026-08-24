@@ -42,7 +42,7 @@ def render_image_overlay(
         entity_id = f"{class_name}_{counters[class_name]:02d}"
         level = None
         if class_name == "person":
-            level = person_levels.get(entity_id)
+            level = person_levels.get(entity_id, assessment.level)
         _draw_detection(output, detection, entity_id=entity_id, level=level)
 
     _draw_frame_banner(output, assessment)

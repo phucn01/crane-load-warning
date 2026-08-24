@@ -70,12 +70,7 @@ class RiskEvaluator:
                 matched_zone = RiskLevel.WARNING
 
         geometry_level = matched_zone or RiskLevel.SAFE
-        level = geometry_level
-        if not assessment_reliable:
-            level = max(
-                (geometry_level, self.policy.unreliable_fallback_level),
-                key=lambda candidate: candidate.severity,
-            )
+        level = geometry_level if assessment_reliable else RiskLevel.SAFE
 
         confidence = person.confidence if math.isfinite(person.confidence) else 0.0
         confidence = min(1.0, max(0.0, confidence))

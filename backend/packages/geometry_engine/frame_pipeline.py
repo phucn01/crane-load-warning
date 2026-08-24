@@ -66,7 +66,7 @@ class GeometryFramePipeline:
             raise ValueError("frame_id must not be empty")
         _validate_depth_map(depth_map)
 
-        depth_low, depth_high = calculate_depth_normalization_range(depth_map)
+        depth_low, depth_high = calculate_depth_normalization_range(depth_map, upper_percentile=100)
         image_width = int(depth_map.shape[1])
         person_detections: list[Detection] = []
         load_detections: list[Detection] = []

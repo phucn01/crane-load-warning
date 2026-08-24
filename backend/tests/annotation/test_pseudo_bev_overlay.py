@@ -1,3 +1,4 @@
+from dataclasses import replace
 from unittest.mock import Mock
 
 import numpy as np
@@ -117,6 +118,39 @@ def test_renders_research_style_title_and_axis_labels(
     assert "Relative lateral position" in rendered_text
     assert "Relative longitudinal position" in rendered_text
     assert all("not metric" not in text.lower() for text in rendered_text)
+
+
+def test_pairless_safe_frame_labels_people_as_safe(
+    annotation_bundle: AnnotationBundle,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import cv2
+
+    assessment = replace(
+        annotation_bundle.risk_result.assessment,
+        level=RiskLevel.SAFE,
+        assessment_reliable=False,
+        quality_reasons=("no_risk_assessments",),
+        pair_assessments=(),
+        contributing_person_ids=(),
+        contributing_load_ids=(),
+    )
+    rendered_text: list[str] = []
+    original_put_text = cv2.putText
+
+    def capture_text(image, text, *args, **kwargs):
+        rendered_text.append(text)
+        return original_put_text(image, text, *args, **kwargs)
+
+    monkeypatch.setattr(cv2, "putText", capture_text)
+    render_pseudo_bev_overlay(
+        annotation_bundle.geometry,
+        assessment,
+        width=480,
+        height=400,
+    )
+
+    assert "P1 - SAFE" in rendered_text
 
 
 def test_rejects_too_small_pseudo_bev_panel(annotation_bundle: AnnotationBundle):
