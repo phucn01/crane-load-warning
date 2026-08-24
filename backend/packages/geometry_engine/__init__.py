@@ -15,10 +15,13 @@ from .connected_region import find_connected_candidate_region
 from .contracts import (
     DepthQuality,
     DepthStatistics,
+    GeometryFrameResult,
     ImagePoint,
     LoadAnchorCandidate,
     LoadAnchorCandidates,
+    LoadGeometryResult,
     LoadSafetyZones,
+    PersonGeometryResult,
     PersonRepresentative,
     PseudoBEVPoint,
     PseudoBEVRectangle,
@@ -26,6 +29,7 @@ from .contracts import (
 )
 from .depth_utils import calculate_depth_normalization_range
 from .farthest_point_sampling import select_farthest_load_anchors
+from .frame_pipeline import GeometryFramePipeline
 from .load_anchors import (
     build_load_anchor_candidates,
     filter_candidates_by_seed_depth,
@@ -58,11 +62,15 @@ __all__ = [
     "DepthStatistics",
     "FarthestPointSamplingConfig",
     "GeometryConfig",
+    "GeometryFramePipeline",
+    "GeometryFrameResult",
     "ImagePoint",
     "LoadAnchorCandidate",
     "LoadAnchorCandidates",
     "LoadAnchorsConfig",
+    "LoadGeometryResult",
     "LoadSafetyZones",
+    "PersonGeometryResult",
     "PersonRepresentative",
     "PseudoBEVConfig",
     "PseudoBEVPoint",

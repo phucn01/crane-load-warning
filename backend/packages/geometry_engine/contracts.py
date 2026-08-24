@@ -141,13 +141,60 @@ class LoadAnchorCandidates:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class PersonGeometryResult:
+    """Completed geometry for one person detection in one frame."""
+
+    person_id: str
+    confidence: float
+    bbox: tuple[float, float, float, float]
+    representative: PersonRepresentative
+    pseudo_bev_point: PseudoBEVPoint | None
+    mask_reliable: bool
+    quality_reasons: tuple[str, ...] = ()
+    track_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LoadGeometryResult:
+    """Completed anchor, projection, and zone geometry for one load."""
+
+    load_id: str
+    confidence: float
+    bbox: tuple[float, float, float, float]
+    representative_depth: RepresentativeDepth
+    candidate_selection: LoadAnchorCandidates
+    inner_bbox: tuple[float, float, float, float]
+    connected_candidates: tuple[LoadAnchorCandidate, ...]
+    final_anchors: tuple[LoadAnchorCandidate, ...]
+    pseudo_bev_points: tuple[PseudoBEVPoint, ...]
+    safety_zones: LoadSafetyZones | None
+    quality_reasons: tuple[str, ...] = ()
+    track_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class GeometryFrameResult:
+    """Deterministic geometry output for all relevant detections in one frame."""
+
+    frame_id: str
+    depth_low: float
+    depth_high: float
+    persons: tuple[PersonGeometryResult, ...]
+    loads: tuple[LoadGeometryResult, ...]
+    quality_reasons: tuple[str, ...] = ()
+
+
 __all__ = [
     "DepthQuality",
     "DepthStatistics",
+    "GeometryFrameResult",
     "ImagePoint",
     "LoadAnchorCandidate",
     "LoadAnchorCandidates",
+    "LoadGeometryResult",
     "LoadSafetyZones",
+    "PersonGeometryResult",
     "PersonRepresentative",
     "PseudoBEVPoint",
     "PseudoBEVRectangle",
