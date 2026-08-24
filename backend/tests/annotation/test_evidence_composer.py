@@ -39,7 +39,7 @@ def test_writes_image_and_traceable_json_for_non_safe_assessment(
     assert artifacts.evidence_image_path.is_file()
     assert artifacts.assessment_json_path.is_file()
     evidence = cv2.imread(str(artifacts.evidence_image_path), cv2.IMREAD_COLOR)
-    assert evidence is not None and evidence.shape == (736, 1280, 3)
+    assert evidence is not None and evidence.shape == (416, 640, 3)
     payload = json.loads(artifacts.assessment_json_path.read_text(encoding="utf-8"))
     assert payload["assessment"]["level"] == level.value
     assert payload["assessment"]["pairs"][0]["level"] == level.value
@@ -72,6 +72,27 @@ def test_safe_assessment_does_not_create_evidence(
 
     assert artifacts is None
     assert not (tmp_path / "safe").exists()
+
+
+def test_default_pseudo_bev_uses_wide_chart_size(
+    annotation_bundle: AnnotationBundle,
+):
+    composer = OfflineEvidenceComposer()
+    output = composer.render_pseudo_bev(
+        annotation_bundle.geometry,
+        annotation_bundle.risk_result.assessment,
+    )
+    combined = composer.compose(
+        image_bgr=annotation_bundle.image_bgr,
+        detections=annotation_bundle.detections,
+        geometry=annotation_bundle.geometry,
+        risk_result=annotation_bundle.risk_result,
+        context=annotation_bundle.context,
+        traceability=TRACEABILITY,
+    )
+
+    assert output.shape == (720, 960, 3)
+    assert combined.shape == (816, 1920, 3)
 
 
 def test_composed_evidence_is_deterministic(annotation_bundle: AnnotationBundle):

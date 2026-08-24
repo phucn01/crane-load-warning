@@ -34,7 +34,7 @@ class OfflineEvidenceComposer:
     def __init__(
         self,
         *,
-        pseudo_bev_size: tuple[int, int] = (640, 640),
+        pseudo_bev_size: tuple[int, int] = (960, 720),
         timeline: PipelineTimeline | None = None,
     ) -> None:
         width, height = pseudo_bev_size
@@ -120,6 +120,7 @@ class OfflineEvidenceComposer:
             assessment=risk_result.assessment,
             context=context,
             traceability=traceability,
+            panel_size=self.pseudo_bev_size,
         )
 
     def write(
@@ -223,11 +224,21 @@ def compose_evidence_image(
     assessment: FrameRiskAssessment,
     context: MediaFrameContext,
     traceability: EvidenceTraceability,
+    panel_size: tuple[int, int] = (640, 640),
 ) -> NDArray[np.uint8]:
     """Place the two explanatory views beside a deterministic metadata footer."""
 
-    left = _fit_panel(image_overlay, target_height=640, target_width=640)
-    right = _fit_panel(pseudo_bev_overlay, target_height=640, target_width=640)
+    panel_width, panel_height = panel_size
+    left = _fit_panel(
+        image_overlay,
+        target_height=panel_height,
+        target_width=panel_width,
+    )
+    right = _fit_panel(
+        pseudo_bev_overlay,
+        target_height=panel_height,
+        target_width=panel_width,
+    )
     panels = np.hstack((left, right))
     footer = np.full((96, panels.shape[1], 3), 30, dtype=np.uint8)
     color = RISK_COLORS_BGR[assessment.level]
