@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from starlette.staticfiles import StaticFiles
 
@@ -41,6 +42,13 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.settings = resolved_settings
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(resolved_settings.cors_origins),
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Accept", "Content-Type"],
+    )
     application.include_router(health.router, prefix="/api/v1")
     application.include_router(detection.router, prefix="/api/v1")
     application.mount(

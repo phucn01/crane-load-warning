@@ -17,6 +17,10 @@ class Settings:
     evidence_root: Path
     max_upload_bytes: int = 20 * 1024 * 1024
     preload_models: bool = False
+    cors_origins: tuple[str, ...] = (
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    )
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -42,6 +46,10 @@ class Settings:
                 20 * 1024 * 1024,
             ),
             preload_models=_boolean_environment("CRANE_PRELOAD_MODELS", False),
+            cors_origins=_origins_environment(
+                "CRANE_CORS_ORIGINS",
+                ("http://localhost:5173", "http://127.0.0.1:5173"),
+            ),
         )
 
 
@@ -68,6 +76,22 @@ def _boolean_environment(name: str, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"{name} must be a boolean value")
+
+
+def _origins_environment(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    origins = tuple(
+        dict.fromkeys(
+            item.strip().rstrip("/") for item in raw.split(",") if item.strip()
+        )
+    )
+    if not origins:
+        raise ValueError(f"{name} must contain at least one origin")
+    if "*" in origins:
+        raise ValueError(f"{name} must not use a wildcard origin")
+    return origins
 
 
 __all__ = ["PROJECT_ROOT", "Settings"]

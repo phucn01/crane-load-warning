@@ -193,3 +193,25 @@ def test_unknown_resource_returns_404(tmp_path: Path) -> None:
         response = client.get("/api/v1/unknown")
 
     assert response.status_code == 404
+
+
+def test_cors_allows_only_configured_frontend_origin(tmp_path: Path) -> None:
+    with _client(tmp_path, FakeImageProcessingService()) as client:
+        allowed = client.options(
+            "/api/v1/detection/image",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        denied = client.options(
+            "/api/v1/detection/image",
+            headers={
+                "Origin": "https://untrusted.example",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+    assert allowed.status_code == 200
+    assert allowed.headers["access-control-allow-origin"] == ("http://localhost:5173")
+    assert "access-control-allow-origin" not in denied.headers

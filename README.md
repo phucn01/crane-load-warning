@@ -29,3 +29,17 @@ python backend/scripts/run_image.py `
 
 See `backend/README.md` for installation and artifact details. Relative depth
 and Pseudo-BEV geometry are non-metric until camera calibration exists.
+
+## Run the image assessment interface
+
+Keep the backend running on port 8000. In another terminal:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` to select or drop a JPG/PNG image, preview it
+locally, run the safety assessment, and review the risk result and evidence.
+Set `VITE_API_BASE_URL` when the API is hosted at a different origin.

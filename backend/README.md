@@ -105,6 +105,7 @@ Optional environment settings:
 - `CRANE_EVIDENCE_ROOT`
 - `CRANE_MAX_UPLOAD_BYTES`
 - `CRANE_PRELOAD_MODELS`
+- `CRANE_CORS_ORIGINS` (comma-separated exact origins; no wildcard)
 - `CRANE_LOG_LEVEL`
 
 Frame-local `person_id` and `load_id` values in a response are explanatory
