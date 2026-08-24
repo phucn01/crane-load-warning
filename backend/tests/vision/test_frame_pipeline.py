@@ -7,19 +7,19 @@ import unittest
 from pathlib import Path
 
 import numpy as np
-
+from pipeline_timeline import PipelineTimeline, TimelineStatus
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BACKEND_DIR / "packages"))
 
-from vision_engine.contracts import (  # noqa: E402
+from vision_engine.contracts import (
     DepthMapMetadata,
     RelativeDepthResult,
 )
-from vision_engine.frame_pipeline import (  # noqa: E402
-    OfflineFramePipeline,
+from vision_engine.frame_pipeline import (
+    VisionFramePipeline,
     render_detection_preview,
-    write_phase1_artifacts,
+    write_vision_artifacts,
 )
 
 
@@ -100,22 +100,29 @@ class FramePipelineTests(unittest.TestCase):
         load = FakeDetector([make_detection("hanging_object", "RF-DETR Medium")])
         person = FakeDetector([make_detection("person", "YOLO26m", mask)])
         depth = FakeDepth()
-        pipeline = OfflineFramePipeline(
+        timeline = PipelineTimeline()
+        pipeline = VisionFramePipeline(
             FakeManager(
                 {
                     "rfdetr": load,
                     "yolo_person": person,
                     "depth_anything_v3": depth,
                 }
-            )
+            ),
+            timeline=timeline,
         )
 
-        result = pipeline.process(image)
+        result = pipeline.process(image, frame_id="frame-000001")
 
         self.assertEqual((load.calls, person.calls, depth.calls), (1, 1, 1))
+        self.assertEqual(result.frame_id, "frame-000001")
+        self.assertIsInstance(result.detections, tuple)
+        timing = timeline.snapshot()[0]
+        self.assertEqual((timing.component, timing.operation), ("vision", "process"))
+        self.assertIs(timing.status, TimelineStatus.COMPLETED)
         with tempfile.TemporaryDirectory() as directory:
             run_dir = Path(directory) / "run"
-            write_phase1_artifacts(
+            write_vision_artifacts(
                 result,
                 image_bgr=image,
                 image_path="sample.png",
@@ -132,12 +139,20 @@ class FramePipelineTests(unittest.TestCase):
             payload = json.loads(
                 (run_dir / "detections.json").read_text(encoding="utf-8")
             )
+            self.assertEqual(payload["frame_id"], "frame-000001")
             person_json = next(
                 item for item in payload["detections"] if item["class_name"] == "person"
             )
             self.assertEqual(person_json["mask_ref"], "masks/person_01.npy")
             saved_mask = np.load(run_dir / person_json["mask_ref"], allow_pickle=False)
             np.testing.assert_array_equal(saved_mask, mask)
+
+    def test_rejects_empty_frame_id(self):
+        image = np.zeros((8, 10, 3), dtype=np.uint8)
+        pipeline = VisionFramePipeline(FakeManager({}))
+
+        with self.assertRaisesRegex(ValueError, "frame_id must not be empty"):
+            pipeline.process(image, frame_id="")
 
 
 if __name__ == "__main__":

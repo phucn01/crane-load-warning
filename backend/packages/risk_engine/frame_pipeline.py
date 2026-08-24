@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
+from pipeline_timeline import PipelineTimeline
+
 from .contracts import (
     EventScope,
     FrameRiskAssessment,
@@ -77,9 +79,12 @@ class RiskFramePipeline:
         self,
         evaluator: RiskEvaluator | None = None,
         state_machine: EventStateMachine | None = None,
+        *,
+        timeline: PipelineTimeline | None = None,
     ) -> None:
         self.evaluator = evaluator or RiskEvaluator()
         self.state_machine = state_machine or EventStateMachine()
+        self.timeline = timeline
 
     def process(
         self,
@@ -89,6 +94,21 @@ class RiskFramePipeline:
     ) -> RiskFrameResult:
         """Process an image or video frame through the same frame-level API."""
 
+        if self.timeline is not None:
+            with self.timeline.track(
+                "risk",
+                "process",
+                frame_id=context.frame_id,
+            ):
+                return self._process(pair_inputs, context=context)
+        return self._process(pair_inputs, context=context)
+
+    def _process(
+        self,
+        pair_inputs: Iterable[RiskPairInput],
+        *,
+        context: MediaFrameContext,
+    ) -> RiskFrameResult:
         assessments = tuple(
             self.evaluator.evaluate(
                 item.person,

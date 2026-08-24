@@ -9,13 +9,12 @@ from pathlib import Path
 import cv2
 import yaml
 
-
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 PROJECT_DIR = BACKEND_DIR.parent
 sys.path.insert(0, str(BACKEND_DIR / "packages"))
 
-from vision_engine.frame_pipeline import OfflineFramePipeline  # noqa: E402
-from vision_engine.model_manager import (  # noqa: E402
+from vision_engine.frame_pipeline import VisionFramePipeline
+from vision_engine.model_manager import (
     ModelManager,
     build_model_manager,
 )
@@ -82,8 +81,12 @@ class RealModelIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(image, f"OpenCV could not decode: {image_path}")
 
         manager = build_model_manager(config, config_dir=config_path.parent)
-        pipeline = OfflineFramePipeline(manager)
-        result = pipeline.process(image, image_path=image_path)
+        pipeline = VisionFramePipeline(manager)
+        result = pipeline.process(
+            image,
+            frame_id="integration-frame-000001",
+            image_path=image_path,
+        )
         metadata = manager.metadata()
 
         detection_summary = [

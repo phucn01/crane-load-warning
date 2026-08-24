@@ -3,19 +3,22 @@
 from .contracts import (
     DepthMapMetadata,
     Detection,
-    FramePipelineResult,
     RelativeDepthResult,
+    VisionFrameResult,
 )
-from .frame_pipeline import OfflineFramePipeline, write_phase1_artifacts
+from .frame_pipeline import (
+    VisionFramePipeline,
+    write_vision_artifacts,
+)
 from .model_manager import ModelManager, build_model_manager
 
 __all__ = [
     "DepthMapMetadata",
     "Detection",
-    "FramePipelineResult",
     "ModelManager",
-    "OfflineFramePipeline",
     "RelativeDepthResult",
+    "VisionFramePipeline",
+    "VisionFrameResult",
     "build_model_manager",
-    "write_phase1_artifacts",
+    "write_vision_artifacts",
 ]

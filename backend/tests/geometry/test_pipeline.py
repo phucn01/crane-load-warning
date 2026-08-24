@@ -10,6 +10,7 @@ from geometry_engine import (
     ZoneBufferConfig,
     ZonesConfig,
 )
+from pipeline_timeline import PipelineTimeline, TimelineStatus
 from vision_engine.contracts import Detection
 
 
@@ -39,7 +40,7 @@ def detection(
     return result
 
 
-def pipeline() -> GeometryFramePipeline:
+def pipeline(*, timeline: PipelineTimeline | None = None) -> GeometryFramePipeline:
     return GeometryFramePipeline(
         GeometryConfig(
             representative_depth=RepresentativeDepthConfig(
@@ -64,7 +65,8 @@ def pipeline() -> GeometryFramePipeline:
                 danger=ZoneBufferConfig(0.2, 0.2),
                 warning=ZoneBufferConfig(0.4, 0.4),
             ),
-        )
+        ),
+        timeline=timeline,
     )
 
 
@@ -87,7 +89,12 @@ def test_processes_people_loads_and_ignores_rope_detections():
         ),
     )
 
-    result = pipeline().process(detections, depth_map, frame_id="frame-001")
+    timeline = PipelineTimeline()
+    result = pipeline(timeline=timeline).process(
+        detections,
+        depth_map,
+        frame_id="frame-001",
+    )
 
     assert result.frame_id == "frame-001"
     assert result.quality_reasons == ()
@@ -103,6 +110,9 @@ def test_processes_people_loads_and_ignores_rope_detections():
     assert 2 <= len(result.loads[0].final_anchors) <= 4
     assert result.loads[0].safety_zones is not None
     assert result.loads[0].quality_reasons == ()
+    timing = timeline.snapshot()[0]
+    assert (timing.component, timing.operation) == ("geometry", "process")
+    assert timing.status is TimelineStatus.COMPLETED
 
 
 def test_same_inputs_return_the_same_geometry_result():

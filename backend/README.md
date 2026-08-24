@@ -1,10 +1,12 @@
 # Backend
 
-Phase 1 provides an offline, single-image vision pipeline. It runs:
+The image entry point runs the current safety pipeline:
 
 1. RF-DETR Medium for `hanging_object` and `hanging_rope`.
 2. YOLO26m segmentation for `person` bbox, confidence, and mask.
 3. Depth Anything V3 once for an image-sized relative-depth map.
+4. Geometry and depth-independent risk assessment.
+5. Annotation preview, non-safe evidence, and execution timeline.
 
 Depth values are relative and must not be interpreted as metric distances.
 
@@ -28,9 +30,11 @@ and local configuration are ignored by Git.
 From the repository root:
 
 ```powershell
-python backend/scripts/run_offline_image.py `
+python backend/scripts/run_image.py `
   --image "data/samples/example.png" `
-  --config "configs/models.local.yaml" `
+  --models-config "configs/models.local.yaml" `
+  --geometry-config "configs/geometry.local.yaml" `
+  --risk-config "configs/risk-policy.example.yaml" `
   --output-root "outputs"
 ```
 
@@ -41,8 +45,14 @@ detections.json
 relative_depth.npy
 model_metadata.json
 detection_preview.png
+annotation_preview.png
+pipeline_timeline.json
 masks/person_XX.npy       # only when YOLO returns masks
 ```
+
+For `WARNING` or `DANGER`, the directory also contains an evidence PNG and
+assessment JSON. A `SAFE` image still produces `annotation_preview.png`, but no
+alert evidence artifact.
 
 `detections.json` contains JSON-safe bbox/confidence fields and a `mask_ref`
 for every persisted person mask. `relative_depth.npy` preserves float32 depth

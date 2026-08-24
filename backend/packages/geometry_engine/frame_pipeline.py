@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
+from pipeline_timeline import PipelineTimeline
 from vision_engine.contracts import Detection, clip_bbox
 
 from .config import GeometryConfig
@@ -33,10 +34,28 @@ from .zones import build_load_zones
 class GeometryFramePipeline:
     """Run all geometry stages for one frame without duplicating algorithms."""
 
-    def __init__(self, config: GeometryConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: GeometryConfig | None = None,
+        *,
+        timeline: PipelineTimeline | None = None,
+    ) -> None:
         self.config = config or GeometryConfig()
+        self.timeline = timeline
 
     def process(
+        self,
+        detections: Iterable[Detection],
+        depth_map: NDArray[np.generic],
+        *,
+        frame_id: str,
+    ) -> GeometryFrameResult:
+        if self.timeline is not None:
+            with self.timeline.track("geometry", "process", frame_id=frame_id):
+                return self._process(detections, depth_map, frame_id=frame_id)
+        return self._process(detections, depth_map, frame_id=frame_id)
+
+    def _process(
         self,
         detections: Iterable[Detection],
         depth_map: NDArray[np.generic],

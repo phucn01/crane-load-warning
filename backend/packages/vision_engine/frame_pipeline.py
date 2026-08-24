@@ -1,23 +1,24 @@
-"""Offline single-image orchestration and Phase-1 artifact writing."""
+"""Frame-level vision orchestration and offline artifact writing."""
 
 from __future__ import annotations
 
 import json
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
+from pipeline_timeline import PipelineTimeline
 
 from .contracts import (
     Detection,
-    FramePipelineResult,
+    VisionFrameResult,
     detection_to_dict,
 )
 from .model_manager import ModelManager
-
 
 CLASS_COLORS_BGR = {
     "person": (166, 166, 0),
@@ -26,18 +27,47 @@ CLASS_COLORS_BGR = {
 }
 
 
-class OfflineFramePipeline:
-    """Run all Phase-1 models exactly once for one image."""
+class VisionFramePipeline:
+    """Run all vision models exactly once for one image or video frame."""
 
-    def __init__(self, model_manager: ModelManager) -> None:
+    def __init__(
+        self,
+        model_manager: ModelManager,
+        *,
+        timeline: PipelineTimeline | None = None,
+    ) -> None:
         self.model_manager = model_manager
+        self.timeline = timeline
 
     def process(
         self,
         image_bgr: NDArray[np.generic],
         *,
+        frame_id: str,
         image_path: str | Path | None = None,
-    ) -> FramePipelineResult:
+    ) -> VisionFrameResult:
+        if self.timeline is not None:
+            with self.timeline.track("vision", "process", frame_id=frame_id):
+                return self._process(
+                    image_bgr,
+                    frame_id=frame_id,
+                    image_path=image_path,
+                )
+        return self._process(
+            image_bgr,
+            frame_id=frame_id,
+            image_path=image_path,
+        )
+
+    def _process(
+        self,
+        image_bgr: NDArray[np.generic],
+        *,
+        frame_id: str,
+        image_path: str | Path | None,
+    ) -> VisionFrameResult:
+        if not frame_id:
+            raise ValueError("frame_id must not be empty")
         _validate_image(image_bgr)
         load_detector = self.model_manager.get("rfdetr")
         person_segmenter = self.model_manager.get("yolo_person")
@@ -49,14 +79,15 @@ class OfflineFramePipeline:
             image_bgr,
             image_path=image_path,
         )
-        return FramePipelineResult(
-            detections=load_detections + person_detections,
+        return VisionFrameResult(
+            frame_id=frame_id,
+            detections=tuple(load_detections + person_detections),
             relative_depth=relative_depth,
         )
 
 
-def write_phase1_artifacts(
-    result: FramePipelineResult,
+def write_vision_artifacts(
+    result: VisionFrameResult,
     *,
     image_bgr: NDArray[np.generic],
     image_path: str | Path,
@@ -100,6 +131,7 @@ def write_phase1_artifacts(
     )
     detections_payload = {
         "schema_version": "1.0",
+        "frame_id": result.frame_id,
         "source_image": str(Path(image_path).resolve()),
         "image": {
             "height": int(image_bgr.shape[0]),
@@ -123,7 +155,8 @@ def write_phase1_artifacts(
 
 
 def render_detection_preview(
-    image_bgr: NDArray[np.generic], detections: list[Detection]
+    image_bgr: NDArray[np.generic],
+    detections: Sequence[Detection],
 ) -> NDArray[np.uint8]:
     output = image_bgr.copy()
     for detection in detections:
@@ -148,9 +181,7 @@ def render_detection_preview(
             )
             cv2.drawContours(output, contours, -1, color, 2, cv2.LINE_AA)
 
-        x1, y1, x2, y2 = (
-            int(round(value)) for value in detection["bbox"]
-        )
+        x1, y1, x2, y2 = (round(value) for value in detection["bbox"])
         # Draw a person bbox only when its mask is missing.
         if not has_person_mask:
             cv2.rectangle(output, (x1, y1), (x2, y2), color, 2)
@@ -185,7 +216,7 @@ def _validate_image(image: Any) -> None:
 
 
 __all__ = [
-    "OfflineFramePipeline",
+    "VisionFramePipeline",
     "render_detection_preview",
-    "write_phase1_artifacts",
+    "write_vision_artifacts",
 ]

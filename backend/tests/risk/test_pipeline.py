@@ -1,4 +1,5 @@
 import pytest
+from pipeline_timeline import PipelineTimeline, TimelineStatus
 from risk_engine import (
     EventPolicy,
     EventStateMachine,
@@ -63,7 +64,8 @@ def pair(
 
 
 def test_image_mode_returns_immediate_assessment_without_temporal_event():
-    result = RiskFramePipeline().process(
+    timeline = PipelineTimeline()
+    result = RiskFramePipeline(timeline=timeline).process(
         (pair("person-1", Point2D(50.0, 50.0)),),
         context=image_context(),
     )
@@ -71,6 +73,9 @@ def test_image_mode_returns_immediate_assessment_without_temporal_event():
     assert result.assessment.level is RiskLevel.DANGER
     assert result.assessment.contributing_person_ids == ("person-1",)
     assert result.event is None
+    timing = timeline.snapshot()[0]
+    assert (timing.component, timing.operation) == ("risk", "process")
+    assert timing.status is TimelineStatus.COMPLETED
 
 
 def test_video_mode_confirms_one_scene_event_across_frames():

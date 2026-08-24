@@ -8,7 +8,6 @@ from typing import Any, TypedDict
 import numpy as np
 from numpy.typing import NDArray
 
-
 BBox = tuple[float, float, float, float]
 BooleanMask = NDArray[np.bool_]
 
@@ -51,8 +50,11 @@ class RelativeDepthResult:
 
 
 @dataclass(frozen=True, slots=True)
-class FramePipelineResult:
-    detections: list[Detection]
+class VisionFrameResult:
+    """Deterministic vision output for one frame."""
+
+    frame_id: str
+    detections: tuple[Detection, ...]
     relative_depth: RelativeDepthResult
 
 
@@ -125,8 +127,8 @@ __all__ = [
     "BooleanMask",
     "DepthMapMetadata",
     "Detection",
-    "FramePipelineResult",
     "RelativeDepthResult",
+    "VisionFrameResult",
     "clip_bbox",
     "detection_to_dict",
     "tensor_to_numpy",

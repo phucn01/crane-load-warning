@@ -11,6 +11,7 @@ dependencies = [
     # depth-anything-3 0.1.1 imports addict but omits it from Requires-Dist.
     "addict>=2.4",
     "depth-anything-3>=0.1.1",
+    "matplotlib>=3.9",
     "numpy>=1.26",
     "opencv-python>=4.10",
     "Pillow>=10",
