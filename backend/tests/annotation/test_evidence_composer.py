@@ -103,6 +103,44 @@ def test_composed_evidence_is_deterministic(annotation_bundle: AnnotationBundle)
     )
 
 
+def test_standalone_and_combined_evidence_share_one_bev_renderer(
+    annotation_bundle: AnnotationBundle,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    composer = OfflineEvidenceComposer(pseudo_bev_size=(320, 240))
+    expected = np.full((240, 320, 3), 123, dtype=np.uint8)
+    calls = 0
+
+    def fake_renderer(geometry, assessment, *, width, height):
+        nonlocal calls
+        calls += 1
+        assert geometry is annotation_bundle.geometry
+        assert assessment is annotation_bundle.risk_result.assessment
+        assert (width, height) == (320, 240)
+        return expected.copy()
+
+    monkeypatch.setattr(
+        "annotation_engine.evidence_composer.render_pseudo_bev_chart",
+        fake_renderer,
+    )
+
+    standalone = composer.render_pseudo_bev(
+        annotation_bundle.geometry,
+        annotation_bundle.risk_result.assessment,
+    )
+    composer.compose(
+        image_bgr=annotation_bundle.image_bgr,
+        detections=annotation_bundle.detections,
+        geometry=annotation_bundle.geometry,
+        risk_result=annotation_bundle.risk_result,
+        context=annotation_bundle.context,
+        traceability=TRACEABILITY,
+    )
+
+    assert np.array_equal(standalone, expected)
+    assert calls == 2
+
+
 def test_rejects_mismatched_frame_identity(annotation_bundle: AnnotationBundle):
     wrong_context = replace(annotation_bundle.context, frame_id="other-frame")
 

@@ -2,7 +2,11 @@ from unittest.mock import Mock
 
 import numpy as np
 import pytest
-from annotation_engine import draw_pseudo_bev_chart, render_pseudo_bev_overlay
+from annotation_engine import (
+    draw_pseudo_bev_chart,
+    render_pseudo_bev_chart,
+    render_pseudo_bev_overlay,
+)
 from annotation_engine.image_overlay import RISK_COLORS_BGR
 from annotation_engine.pseudo_bev_overlay import FOOTPRINT_BGR
 from risk_engine import RiskLevel
@@ -70,6 +74,22 @@ def test_draws_research_chart_from_production_geometry(
     axis.set_xlabel.assert_called_once_with("Relative lateral position")
     axis.set_ylabel.assert_called_once_with("Relative longitudinal position")
     axis.legend.assert_called_once_with(loc="best")
+
+
+def test_renders_research_chart_as_api_image(
+    annotation_bundle: AnnotationBundle,
+):
+    output = render_pseudo_bev_chart(
+        annotation_bundle.geometry,
+        annotation_bundle.risk_result.assessment,
+        width=640,
+        height=480,
+        dpi=100,
+    )
+
+    assert output.shape == (480, 640, 3)
+    assert output.dtype == np.uint8
+    assert np.count_nonzero(np.any(output != output[0, 0], axis=2)) > 1_000
 
 
 def test_renders_research_style_title_and_axis_labels(

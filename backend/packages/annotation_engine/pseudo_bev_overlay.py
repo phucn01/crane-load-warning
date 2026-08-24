@@ -200,6 +200,37 @@ def draw_pseudo_bev_chart(
         axis.legend(loc="best")
 
 
+def render_pseudo_bev_chart(
+    geometry: GeometryFrameResult,
+    assessment: FrameRiskAssessment,
+    *,
+    width: int = 960,
+    height: int = 720,
+    dpi: int = 120,
+) -> NDArray[np.uint8]:
+    """Render the Matplotlib Pseudo-BEV chart used by offline assessments."""
+
+    if width < 320 or height < 240:
+        raise ValueError("Pseudo-BEV chart dimensions must be at least 320x240")
+    if dpi <= 0:
+        raise ValueError("Pseudo-BEV chart dpi must be greater than zero")
+
+    from matplotlib.backends.backend_agg import FigureCanvasAgg
+    from matplotlib.figure import Figure
+
+    figure = Figure(
+        figsize=(width / dpi, height / dpi),
+        dpi=dpi,
+        constrained_layout=True,
+    )
+    canvas = FigureCanvasAgg(figure)
+    axis = figure.add_subplot(1, 1, 1)
+    draw_pseudo_bev_chart(axis, geometry, assessment)
+    canvas.draw()
+    rgba = np.asarray(canvas.buffer_rgba(), dtype=np.uint8)
+    return cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGR)
+
+
 def _build_viewport(
     geometry: GeometryFrameResult,
     *,
@@ -505,4 +536,8 @@ def _person_levels(assessment: FrameRiskAssessment) -> dict[str, RiskLevel]:
     return levels
 
 
-__all__ = ["draw_pseudo_bev_chart", "render_pseudo_bev_overlay"]
+__all__ = [
+    "draw_pseudo_bev_chart",
+    "render_pseudo_bev_chart",
+    "render_pseudo_bev_overlay",
+]

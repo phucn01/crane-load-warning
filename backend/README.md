@@ -69,3 +69,44 @@ python backend/scripts/test_yolo_person_segmenter.py `
 ```
 
 Confidence thresholds use the range `0` to `1`; `0.35` means 35%.
+
+## Run the local image API
+
+Install the backend, keep the local model and geometry configs described above,
+then run from `backend/`:
+
+```powershell
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+Swagger UI is available at `http://127.0.0.1:8000/docs`. The v1 endpoints are:
+
+- `GET /api/v1/health`
+- `POST /api/v1/detection/image` with multipart field `file` (`jpg`, `jpeg`, or
+  `png`)
+
+Example:
+
+```powershell
+curl.exe -X POST "http://127.0.0.1:8000/api/v1/detection/image" `
+  -F "file=@../data/samples/Crane_fall_zone_01.jpg"
+```
+
+Generated annotation images are served below `/evidence/...`; internal paths
+and depth/mask artifacts are not exposed by the API. Models are lazy-loaded on
+the first analysis and reused for later requests. Set
+`CRANE_PRELOAD_MODELS=true` to load them once during application startup.
+
+Optional environment settings:
+
+- `CRANE_MODELS_CONFIG`
+- `CRANE_GEOMETRY_CONFIG`
+- `CRANE_RISK_CONFIG`
+- `CRANE_EVIDENCE_ROOT`
+- `CRANE_MAX_UPLOAD_BYTES`
+- `CRANE_PRELOAD_MODELS`
+- `CRANE_LOG_LEVEL`
+
+Frame-local `person_id` and `load_id` values in a response are explanatory
+labels only. Tracking and stable cross-frame IDs are intentionally not part of
+this image API.

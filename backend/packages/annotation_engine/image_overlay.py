@@ -33,8 +33,7 @@ def render_image_overlay(
     """Render segmentation when available, otherwise bbox, without physical zones."""
 
     output = _uint8_bgr_image(image_bgr)
-    person_levels = _highest_levels(assessment, entity="person")
-    load_levels = _highest_levels(assessment, entity="load")
+    person_levels = _highest_person_levels(assessment)
     counters: defaultdict[str, int] = defaultdict(int)
 
     for detection in detections:
@@ -44,8 +43,6 @@ def render_image_overlay(
         level = None
         if class_name == "person":
             level = person_levels.get(entity_id)
-        elif class_name == "hanging_object":
-            level = load_levels.get(entity_id)
         _draw_detection(output, detection, entity_id=entity_id, level=level)
 
     _draw_frame_banner(output, assessment)
@@ -146,17 +143,14 @@ def _draw_text_label(
     )
 
 
-def _highest_levels(
+def _highest_person_levels(
     assessment: FrameRiskAssessment,
-    *,
-    entity: str,
 ) -> dict[str, RiskLevel]:
     levels: dict[str, RiskLevel] = {}
     for pair in assessment.pair_assessments:
-        entity_id = pair.person_id if entity == "person" else pair.load_id
-        current = levels.get(entity_id)
+        current = levels.get(pair.person_id)
         if current is None or pair.level.severity > current.severity:
-            levels[entity_id] = pair.level
+            levels[pair.person_id] = pair.level
     return levels
 
 

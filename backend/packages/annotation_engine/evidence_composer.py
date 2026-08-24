@@ -25,7 +25,7 @@ from vision_engine.contracts import Detection
 
 from .contracts import EvidenceArtifacts, EvidenceTraceability
 from .image_overlay import RISK_COLORS_BGR, render_image_overlay
-from .pseudo_bev_overlay import render_pseudo_bev_overlay
+from .pseudo_bev_overlay import render_pseudo_bev_chart
 
 
 class OfflineEvidenceComposer:
@@ -38,10 +38,25 @@ class OfflineEvidenceComposer:
         timeline: PipelineTimeline | None = None,
     ) -> None:
         width, height = pseudo_bev_size
-        if width < 160 or height < 160:
-            raise ValueError("pseudo_bev_size dimensions must be at least 160 pixels")
+        if width < 320 or height < 240:
+            raise ValueError("pseudo_bev_size dimensions must be at least 320x240")
         self.pseudo_bev_size = width, height
         self.timeline = timeline
+
+    def render_pseudo_bev(
+        self,
+        geometry: GeometryFrameResult,
+        assessment: FrameRiskAssessment,
+    ) -> NDArray[np.uint8]:
+        """Render the one BEV representation shared by all evidence outputs."""
+
+        width, height = self.pseudo_bev_size
+        return render_pseudo_bev_chart(
+            geometry,
+            assessment,
+            width=width,
+            height=height,
+        )
 
     def compose(
         self,
@@ -95,12 +110,9 @@ class OfflineEvidenceComposer:
             tuple(detections),
             risk_result.assessment,
         )
-        width, height = self.pseudo_bev_size
-        pseudo_bev_overlay = render_pseudo_bev_overlay(
+        pseudo_bev_overlay = self.render_pseudo_bev(
             geometry,
             risk_result.assessment,
-            width=width,
-            height=height,
         )
         return compose_evidence_image(
             image_overlay,

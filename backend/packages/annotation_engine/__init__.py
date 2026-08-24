@@ -7,7 +7,11 @@ from .evidence_composer import (
     compose_evidence_image,
 )
 from .image_overlay import render_image_overlay
-from .pseudo_bev_overlay import draw_pseudo_bev_chart, render_pseudo_bev_overlay
+from .pseudo_bev_overlay import (
+    draw_pseudo_bev_chart,
+    render_pseudo_bev_chart,
+    render_pseudo_bev_overlay,
+)
 
 __all__ = [
     "EvidenceArtifacts",
@@ -17,5 +21,6 @@ __all__ = [
     "compose_evidence_image",
     "draw_pseudo_bev_chart",
     "render_image_overlay",
+    "render_pseudo_bev_chart",
     "render_pseudo_bev_overlay",
 ]
