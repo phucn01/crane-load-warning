@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, replace
@@ -15,6 +16,54 @@ from typing import Any
 
 TIMEZONE_NAME = "Asia/Bangkok"
 LOCAL_TIMEZONE = timezone(timedelta(hours=7), name=TIMEZONE_NAME)
+LOGGER = logging.getLogger(__name__)
+
+
+@contextmanager
+def log_pipeline_operation(
+    component: str,
+    operation: str,
+    *,
+    frame_id: str,
+    entity_id: str | None = None,
+) -> Iterator[None]:
+    """Emit duration logs without retaining records in memory."""
+
+    entity = "" if entity_id is None else f"\n    ENTITY_ID    : {entity_id}"
+    LOGGER.info(
+        "=== START ===\n    COMPONENT    : %s\n    OPERATION    : %s\n"
+        "    FRAME_ID     : %s%s",
+        component.upper(),
+        operation.upper(),
+        frame_id,
+        entity,
+    )
+    started_ns = perf_counter_ns()
+    try:
+        yield
+    except BaseException as error:
+        LOGGER.exception(
+            "=== ERROR ===\n    COMPONENT    : %s\n    OPERATION    : %s\n"
+            "    FRAME_ID     : %s%s\n    DURATION_MS  : %.3f\n"
+            "    ERROR_TYPE   : %s",
+            component.upper(),
+            operation.upper(),
+            frame_id,
+            entity,
+            (perf_counter_ns() - started_ns) / 1_000_000.0,
+            type(error).__name__,
+        )
+        raise
+    else:
+        LOGGER.info(
+            "=== END ===\n    COMPONENT    : %s\n    OPERATION    : %s\n"
+            "    FRAME_ID     : %s%s\n    DURATION_MS  : %.3f",
+            component.upper(),
+            operation.upper(),
+            frame_id,
+            entity,
+            (perf_counter_ns() - started_ns) / 1_000_000.0,
+        )
 
 
 class TimelineStatus(StrEnum):
@@ -173,4 +222,9 @@ def _local_now() -> str:
     return datetime.now(LOCAL_TIMEZONE).isoformat(timespec="milliseconds")
 
 
-__all__ = ["PipelineTimeline", "TimelineRecord", "TimelineStatus"]
+__all__ = [
+    "PipelineTimeline",
+    "TimelineRecord",
+    "TimelineStatus",
+    "log_pipeline_operation",
+]

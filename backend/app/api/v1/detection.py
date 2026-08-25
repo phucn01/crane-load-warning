@@ -13,6 +13,7 @@ from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
 from app.api.dependencies import VideoJobRepositoryDep, VideoWorkerDep
+from app.core.logging import log_operation
 from app.schemas.detection import ImageDetectionResponse
 from app.schemas.video_job import VideoJobCreatedResponse
 
@@ -37,9 +38,11 @@ async def detect_image(
     file: Annotated[UploadFile, File()],
 ) -> ImageDetectionResponse:
     try:
-        _validate_upload_type(file)
+        with log_operation(LOGGER, "validate_image_upload"):
+            _validate_upload_type(file)
         maximum = request.app.state.settings.max_upload_bytes
-        payload = await file.read(maximum + 1)
+        with log_operation(LOGGER, "read_image_upload"):
+            payload = await file.read(maximum + 1)
         if not payload:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -51,12 +54,19 @@ async def detect_image(
                 detail=f"uploaded image exceeds the {maximum}-byte limit",
             )
 
-        image_bgr = _decode_supported_image(payload)
+        with log_operation(
+            LOGGER, "decode_image_upload", upload_bytes=len(payload)
+        ):
+            image_bgr = _decode_supported_image(payload)
         service = request.app.state.image_processing_service
         try:
-            return await run_in_threadpool(service.process, image_bgr)
+            with log_operation(LOGGER, "process_image_request"):
+                return await run_in_threadpool(service.process, image_bgr)
         except Exception as error:
-            LOGGER.exception("image pipeline failed: %s", type(error).__name__)
+            LOGGER.exception(
+                "=== ERROR | OPERATION=IMAGE_PIPELINE | ERROR_TYPE=%s ===",
+                type(error).__name__,
+            )
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="image processing failed",
@@ -79,22 +89,26 @@ async def detect_video(
     destination: Path | None = None
     job = None
     try:
-        suffix = _validate_video_upload_type(file)
+        with log_operation(LOGGER, "validate_video_upload"):
+            suffix = _validate_video_upload_type(file)
         settings = request.app.state.settings
         upload_root: Path = request.app.state.video_upload_root
         output_root: Path = request.app.state.video_output_root
         upload_root.mkdir(parents=True, exist_ok=True)
         output_root.mkdir(parents=True, exist_ok=True)
         destination = upload_root / f"{uuid4().hex}{suffix}"
-        await run_in_threadpool(
-            _copy_upload,
-            file,
-            destination,
-            settings.max_video_upload_bytes,
-        )
+        with log_operation(LOGGER, "persist_video_upload"):
+            await run_in_threadpool(
+                _copy_upload,
+                file,
+                destination,
+                settings.max_video_upload_bytes,
+            )
         output_path = output_root / f"{uuid4().hex}.mp4"
-        job = repository.create(input_path=destination, output_path=output_path)
-        worker.submit(job.job_id)
+        with log_operation(LOGGER, "create_and_submit_video_job"):
+            job = repository.create(input_path=destination, output_path=output_path)
+            worker.submit(job.job_id)
+        LOGGER.info("=== EVENT | VIDEO_JOB_SUBMITTED | JOB_ID=%s ===", job.job_id)
         prefix = f"/api/v1/jobs/{job.job_id}"
         return VideoJobCreatedResponse(
             job_id=job.job_id,
@@ -111,7 +125,10 @@ async def detect_video(
             destination.unlink(missing_ok=True)
         if job is not None:
             repository.remove(job.job_id)
-        LOGGER.exception("video upload failed: %s", type(error).__name__)
+        LOGGER.exception(
+            "=== ERROR | OPERATION=VIDEO_UPLOAD | ERROR_TYPE=%s ===",
+            type(error).__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="video upload failed",

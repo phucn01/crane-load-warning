@@ -11,7 +11,7 @@ from typing import Any
 import cv2
 import numpy as np
 from numpy.typing import NDArray
-from pipeline_timeline import PipelineTimeline
+from pipeline_timeline import PipelineTimeline, log_pipeline_operation
 
 from .contracts import (
     Detection,
@@ -69,16 +69,28 @@ class VisionFramePipeline:
         if not frame_id:
             raise ValueError("frame_id must not be empty")
         _validate_image(image_bgr)
-        load_detector = self.model_manager.get("rfdetr")
-        person_segmenter = self.model_manager.get("yolo_person")
-        depth_estimator = self.model_manager.get("depth_anything_v3")
+        with log_pipeline_operation(
+            "vision", "prepare_models", frame_id=frame_id
+        ):
+            load_detector = self.model_manager.get("rfdetr")
+            person_segmenter = self.model_manager.get("yolo_person")
+            depth_estimator = self.model_manager.get("depth_anything_v3")
 
-        load_detections = load_detector.predict(image_bgr)
-        person_detections = person_segmenter.predict(image_bgr)
-        relative_depth = depth_estimator.predict(
-            image_bgr,
-            image_path=image_path,
-        )
+        with log_pipeline_operation(
+            "vision", "rfdetr_inference", frame_id=frame_id
+        ):
+            load_detections = load_detector.predict(image_bgr)
+        with log_pipeline_operation(
+            "vision", "yolo_person_inference", frame_id=frame_id
+        ):
+            person_detections = person_segmenter.predict(image_bgr)
+        with log_pipeline_operation(
+            "vision", "depth_inference", frame_id=frame_id
+        ):
+            relative_depth = depth_estimator.predict(
+                image_bgr,
+                image_path=image_path,
+            )
         return VisionFrameResult(
             frame_id=frame_id,
             detections=tuple(load_detections + person_detections),
@@ -213,8 +225,6 @@ def _validate_image(image: Any) -> None:
         raise ValueError("pipeline image must have shape (height, width, 3)")
     if image.shape[0] <= 0 or image.shape[1] <= 0:
         raise ValueError("image height and width must be greater than zero")
-
-
 __all__ = [
     "VisionFramePipeline",
     "render_detection_preview",

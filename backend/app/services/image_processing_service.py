@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -53,9 +54,11 @@ from vision_engine import (
 from vision_engine.model_manager import ModelManager
 
 from app.core.config import Settings
+from app.core.logging import log_operation
 from app.schemas.detection import ImageDetectionResponse
 
 PIPELINE_VERSION = "vision-geometry-risk-annotation-v1"
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,17 +103,19 @@ class ImageProcessingService:
 
     @classmethod
     def from_settings(cls, settings: Settings) -> ImageProcessingService:
-        model_config = _load_yaml(settings.models_config, "models config")
-        geometry_config = load_geometry_config(
-            _required_file(settings.geometry_config, "geometry config")
-        )
-        risk_policy = load_risk_policy(
-            _required_file(settings.risk_config, "risk config")
-        )
-        model_manager = build_model_manager(
-            model_config,
-            config_dir=settings.models_config.parent,
-        )
+        with log_operation(LOGGER, "load_runtime_configuration"):
+            model_config = _load_yaml(settings.models_config, "models config")
+            geometry_config = load_geometry_config(
+                _required_file(settings.geometry_config, "geometry config")
+            )
+            risk_policy = load_risk_policy(
+                _required_file(settings.risk_config, "risk config")
+            )
+        with log_operation(LOGGER, "build_model_manager"):
+            model_manager = build_model_manager(
+                model_config,
+                config_dir=settings.models_config.parent,
+            )
         return cls(
             model_manager=model_manager,
             geometry_pipeline=GeometryFramePipeline(geometry_config),
@@ -128,7 +133,8 @@ class ImageProcessingService:
         )
 
     def preload_models(self) -> None:
-        self.model_manager.load_all()
+        with log_operation(LOGGER, "model_manager_load_all"):
+            self.model_manager.load_all()
 
     def readiness(self) -> dict[str, Any]:
         metadata = self.model_manager.metadata()
@@ -148,6 +154,13 @@ class ImageProcessingService:
 
         started = perf_counter()
         run_id = uuid4().hex
+        LOGGER.info(
+            "=== START | OPERATION=IMAGE_PROCESSING | RUN_ID=%s | WIDTH=%s | "
+            "HEIGHT=%s ===",
+            run_id,
+            image_bgr.shape[1],
+            image_bgr.shape[0],
+        )
         run_dir = self.evidence_root / run_id
         context = MediaFrameContext(
             upload_id=run_id,
@@ -171,16 +184,17 @@ class ImageProcessingService:
                 model_versions=_model_versions(self.model_manager.metadata()),
                 config_versions=self.config_versions,
             )
-            evidence = self._write_annotations(
-                run_dir=run_dir,
-                image_bgr=image_bgr,
-                annotated_bgr=frame.annotated_bgr,
-                detections=frame.vision.detections,
-                geometry=frame.geometry,
-                risk_result=frame.risk,
-                context=context,
-                traceability=traceability,
-            )
+            with log_operation(LOGGER, "write_image_evidence", run_id=run_id):
+                evidence = self._write_annotations(
+                    run_dir=run_dir,
+                    image_bgr=image_bgr,
+                    annotated_bgr=frame.annotated_bgr,
+                    detections=frame.vision.detections,
+                    geometry=frame.geometry,
+                    risk_result=frame.risk,
+                    context=context,
+                    traceability=traceability,
+                )
 
         counts = Counter(item["class_name"] for item in frame.vision.detections)
         models = self.model_manager.metadata().get("models", {})
@@ -210,7 +224,16 @@ class ImageProcessingService:
                 "config_versions": self.config_versions,
             },
         }
-        return ImageDetectionResponse.model_validate(payload)
+        response = ImageDetectionResponse.model_validate(payload)
+        LOGGER.info(
+            "=== END | OPERATION=IMAGE_PROCESSING | RUN_ID=%s | "
+            "DURATION_MS=%.3f | RISK_LEVEL=%s | DETECTIONS=%s ===",
+            run_id,
+            (perf_counter() - started) * 1000.0,
+            frame.risk.assessment.level.value,
+            len(frame.vision.detections),
+        )
+        return response
 
     def process_video_frame(
         self,
@@ -230,6 +253,7 @@ class ImageProcessingService:
             timestamp=timestamp,
             media_type=MediaType.VIDEO,
         )
+        started = perf_counter()
         with self._processing_lock:
             frame = self._run_frame_pipeline(
                 image_bgr,
@@ -245,11 +269,20 @@ class ImageProcessingService:
                     frame.risk.assessment,
                 )
             )
-        return ProcessedFrame(
+        result = ProcessedFrame(
             annotated_bgr=frame.annotated_bgr,
             pseudo_bev_bgr=pseudo_bev,
             risk_level=frame.risk.assessment.level,
         )
+        LOGGER.info(
+            "=== END | OPERATION=VIDEO_FRAME_PROCESSING | JOB_ID=%s | "
+            "FRAME_INDEX=%s | DURATION_MS=%.3f | RISK_LEVEL=%s ===",
+            upload_id,
+            frame_index,
+            (perf_counter() - started) * 1000.0,
+            result.risk_level.value,
+        )
+        return result
 
     def _run_frame_pipeline(
         self,
@@ -261,23 +294,30 @@ class ImageProcessingService:
     ) -> _FramePipelineResult:
         """Single shared Vision -> Geometry -> Risk -> Annotation path."""
 
-        vision = self.vision_pipeline.process(image_bgr, frame_id=context.frame_id)
-        geometry = self.geometry_pipeline.process(
-            vision.detections,
-            vision.relative_depth.depth_map,
-            frame_id=context.frame_id,
-        )
-        risk = self.risk_pipeline.process(
-            _geometry_to_risk_inputs(geometry),
-            context=context,
-            update_temporal_event=update_temporal_event,
-        )
-        annotated = render_image_overlay(
-            image_bgr,
-            vision.detections,
-            risk.assessment,
-            frame_local_labels=frame_local_labels,
-        )
+        fields = {"frame_id": context.frame_id}
+        with log_operation(LOGGER, "vision_pipeline", **fields):
+            vision = self.vision_pipeline.process(
+                image_bgr, frame_id=context.frame_id
+            )
+        with log_operation(LOGGER, "geometry_pipeline", **fields):
+            geometry = self.geometry_pipeline.process(
+                vision.detections,
+                vision.relative_depth.depth_map,
+                frame_id=context.frame_id,
+            )
+        with log_operation(LOGGER, "risk_pipeline", **fields):
+            risk = self.risk_pipeline.process(
+                _geometry_to_risk_inputs(geometry),
+                context=context,
+                update_temporal_event=update_temporal_event,
+            )
+        with log_operation(LOGGER, "render_image_overlay", **fields):
+            annotated = render_image_overlay(
+                image_bgr,
+                vision.detections,
+                risk.assessment,
+                frame_local_labels=frame_local_labels,
+            )
         return _FramePipelineResult(
             vision=vision,
             geometry=geometry,

@@ -1,8 +1,40 @@
 import json
+import logging
 from pathlib import Path
 
 import pytest
-from pipeline_timeline import PipelineTimeline, TimelineStatus
+from pipeline_timeline import (
+    PipelineTimeline,
+    TimelineStatus,
+    log_pipeline_operation,
+)
+
+
+def test_pipeline_log_uses_visible_start_and_end_markers(caplog):
+    with caplog.at_level(logging.INFO), log_pipeline_operation(
+        "geometry",
+        "depth_normalization",
+        frame_id="frame-1",
+        entity_id="load-1",
+    ):
+        pass
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages[0] == (
+        "=== START ===\n"
+        "    COMPONENT    : GEOMETRY\n"
+        "    OPERATION    : DEPTH_NORMALIZATION\n"
+        "    FRAME_ID     : frame-1\n"
+        "    ENTITY_ID    : load-1"
+    )
+    assert messages[1].startswith(
+        "=== END ===\n"
+        "    COMPONENT    : GEOMETRY\n"
+        "    OPERATION    : DEPTH_NORMALIZATION\n"
+        "    FRAME_ID     : frame-1\n"
+        "    ENTITY_ID    : load-1\n"
+        "    DURATION_MS  : "
+    )
 
 
 def test_tracks_running_and_completed_operation():

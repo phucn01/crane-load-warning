@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-from pipeline_timeline import PipelineTimeline
+from pipeline_timeline import PipelineTimeline, log_pipeline_operation
 from vision_engine.contracts import Detection, clip_bbox
 
 from .config import GeometryConfig
@@ -66,7 +66,12 @@ class GeometryFramePipeline:
             raise ValueError("frame_id must not be empty")
         _validate_depth_map(depth_map)
 
-        depth_low, depth_high = calculate_depth_normalization_range(depth_map, upper_percentile=100)
+        with log_pipeline_operation(
+            "geometry", "depth_normalization", frame_id=frame_id
+        ):
+            depth_low, depth_high = calculate_depth_normalization_range(
+                depth_map, upper_percentile=100
+            )
         image_width = int(depth_map.shape[1])
         person_detections: list[Detection] = []
         load_detections: list[Detection] = []
@@ -80,6 +85,7 @@ class GeometryFramePipeline:
             self._process_person(
                 detection,
                 person_id=f"person_{index:02d}",
+                frame_id=frame_id,
                 depth_map=depth_map,
                 image_width=image_width,
                 depth_low=depth_low,
@@ -91,6 +97,7 @@ class GeometryFramePipeline:
             self._process_load(
                 detection,
                 load_id=f"hanging_object_{index:02d}",
+                frame_id=frame_id,
                 depth_map=depth_map,
                 image_width=image_width,
                 depth_low=depth_low,
@@ -117,23 +124,36 @@ class GeometryFramePipeline:
         detection: Detection,
         *,
         person_id: str,
+        frame_id: str,
         depth_map: NDArray[np.generic],
         image_width: int,
         depth_low: float,
         depth_high: float,
     ) -> PersonGeometryResult:
-        representative = estimate_person_representative(
-            detection,
-            depth_map,
-            config=self.config.representative_depth,
-        )
-        pseudo_bev_point = project_person_to_pseudo_bev(
-            representative,
-            image_width=image_width,
-            depth_low=depth_low,
-            depth_high=depth_high,
-            config=self.config.pseudo_bev,
-        )
+        with log_pipeline_operation(
+            "geometry",
+            "person_representative_depth",
+            frame_id=frame_id,
+            entity_id=person_id,
+        ):
+            representative = estimate_person_representative(
+                detection,
+                depth_map,
+                config=self.config.representative_depth,
+            )
+        with log_pipeline_operation(
+            "geometry",
+            "person_pseudo_bev_projection",
+            frame_id=frame_id,
+            entity_id=person_id,
+        ):
+            pseudo_bev_point = project_person_to_pseudo_bev(
+                representative,
+                image_width=image_width,
+                depth_low=depth_low,
+                depth_high=depth_high,
+                config=self.config.pseudo_bev,
+            )
         mask_reliable = _has_valid_mask(detection, depth_map.shape)
         reasons: list[str] = []
         if not mask_reliable:
@@ -160,50 +180,87 @@ class GeometryFramePipeline:
         detection: Detection,
         *,
         load_id: str,
+        frame_id: str,
         depth_map: NDArray[np.generic],
         image_width: int,
         depth_low: float,
         depth_high: float,
     ) -> LoadGeometryResult:
         bbox = _required_bbox(detection, depth_map.shape)
-        representative_depth = load_representative_depth(
-            detection,
-            depth_map,
-            config=self.config.representative_depth,
-        )
-        candidate_selection = build_load_anchor_candidates(
-            detection,
-            depth_map,
-            representative_config=self.config.representative_depth,
-            anchors_config=self.config.load_anchors,
-        )
+        with log_pipeline_operation(
+            "geometry",
+            "load_representative_depth",
+            frame_id=frame_id,
+            entity_id=load_id,
+        ):
+            representative_depth = load_representative_depth(
+                detection,
+                depth_map,
+                config=self.config.representative_depth,
+            )
+        with log_pipeline_operation(
+            "geometry",
+            "load_anchor_candidates",
+            frame_id=frame_id,
+            entity_id=load_id,
+        ):
+            candidate_selection = build_load_anchor_candidates(
+                detection,
+                depth_map,
+                representative_config=self.config.representative_depth,
+                anchors_config=self.config.load_anchors,
+            )
         inner_bbox = _centered_bbox(
             bbox,
             self.config.representative_depth.load_inner_size_fraction,
         )
-        connected_candidates = find_connected_candidate_region(
-            candidate_selection.candidates,
-            root_bbox=inner_bbox,
-            config=self.config.connected_region,
-        )
-        final_anchors = select_farthest_load_anchors(
-            connected_candidates,
-            config=self.config.farthest_point_sampling,
-        )
-        pseudo_bev_points = project_load_anchors_to_pseudo_bev(
-            final_anchors,
-            image_width=image_width,
-            depth_low=depth_low,
-            depth_high=depth_high,
-            config=self.config.pseudo_bev,
-        )
-        safety_zones = build_load_zones(
-            pseudo_bev_points,
-            load_bbox=bbox,
-            image_width=image_width,
-            pseudo_bev_config=self.config.pseudo_bev,
-            config=self.config.zones,
-        )
+        with log_pipeline_operation(
+            "geometry",
+            "connected_candidate_region",
+            frame_id=frame_id,
+            entity_id=load_id,
+        ):
+            connected_candidates = find_connected_candidate_region(
+                candidate_selection.candidates,
+                root_bbox=inner_bbox,
+                config=self.config.connected_region,
+            )
+        with log_pipeline_operation(
+            "geometry",
+            "farthest_anchor_selection",
+            frame_id=frame_id,
+            entity_id=load_id,
+        ):
+            final_anchors = select_farthest_load_anchors(
+                connected_candidates,
+                config=self.config.farthest_point_sampling,
+            )
+        with log_pipeline_operation(
+            "geometry",
+            "load_pseudo_bev_projection",
+            frame_id=frame_id,
+            entity_id=load_id,
+        ):
+            pseudo_bev_points = project_load_anchors_to_pseudo_bev(
+                final_anchors,
+                image_width=image_width,
+                depth_low=depth_low,
+                depth_high=depth_high,
+                config=self.config.pseudo_bev,
+            )
+        with log_pipeline_operation(
+            "geometry",
+            "safety_zone_construction",
+            frame_id=frame_id,
+            entity_id=load_id,
+        ):
+            safety_zones = build_load_zones(
+                pseudo_bev_points,
+                load_bbox=bbox,
+                image_width=image_width,
+                pseudo_bev_config=self.config.pseudo_bev,
+                config=self.config.zones,
+            )
         reasons: list[str] = []
         if representative_depth.quality == "unavailable":
             reasons.append("load_depth_unavailable")

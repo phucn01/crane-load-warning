@@ -9,6 +9,7 @@ from typing import Any
 import cv2
 import numpy as np
 from numpy.typing import NDArray
+from pipeline_timeline import log_pipeline_operation
 from risk_engine import FrameRiskAssessment, RiskLevel
 from vision_engine.contracts import Detection, clip_bbox
 
@@ -34,25 +35,35 @@ def render_image_overlay(
 ) -> NDArray[np.uint8]:
     """Render segmentation when available, otherwise bbox, without physical zones."""
 
-    output = _uint8_bgr_image(image_bgr)
-    person_levels = _highest_person_levels(assessment)
-    counters: defaultdict[str, int] = defaultdict(int)
+    frame_id = assessment.frame_id
+    with log_pipeline_operation(
+        "annotation", "prepare_image_canvas", frame_id=frame_id
+    ):
+        output = _uint8_bgr_image(image_bgr)
+        person_levels = _highest_person_levels(assessment)
+        counters: defaultdict[str, int] = defaultdict(int)
 
-    for detection in detections:
-        class_name = detection["class_name"]
-        counters[class_name] += 1
-        entity_id = f"{class_name}_{counters[class_name]:02d}"
-        display_label = (
-            f"{class_name} {counters[class_name]}"
-            if frame_local_labels
-            else entity_id
-        )
-        level = None
-        if class_name == "person":
-            level = person_levels.get(entity_id, assessment.level)
-        _draw_detection(output, detection, entity_id=display_label, level=level)
+    with log_pipeline_operation(
+        "annotation", "draw_detection_overlays", frame_id=frame_id
+    ):
+        for detection in detections:
+            class_name = detection["class_name"]
+            counters[class_name] += 1
+            entity_id = f"{class_name}_{counters[class_name]:02d}"
+            display_label = (
+                f"{class_name} {counters[class_name]}"
+                if frame_local_labels
+                else entity_id
+            )
+            level = None
+            if class_name == "person":
+                level = person_levels.get(entity_id, assessment.level)
+            _draw_detection(output, detection, entity_id=display_label, level=level)
 
-    _draw_frame_banner(output, assessment)
+    with log_pipeline_operation(
+        "annotation", "draw_risk_banner", frame_id=frame_id
+    ):
+        _draw_frame_banner(output, assessment)
     return output
 
 

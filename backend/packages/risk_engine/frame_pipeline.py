@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from pipeline_timeline import PipelineTimeline
+from pipeline_timeline import PipelineTimeline, log_pipeline_operation
 
 from .contracts import (
     EventScope,
@@ -119,34 +119,49 @@ class RiskFramePipeline:
         context: MediaFrameContext,
         update_temporal_event: bool,
     ) -> RiskFrameResult:
-        assessments = tuple(
-            self.evaluator.evaluate(
-                item.person,
-                load_id=item.load_id,
-                zones=item.zones,
-                load_track_id=item.load_track_id,
+        inputs = tuple(pair_inputs)
+        assessments: list[SafetyAssessment] = []
+        for item in inputs:
+            pair_id = f"{item.person.person_id}:{item.load_id}"
+            with log_pipeline_operation(
+                "risk",
+                "evaluate_person_load_pair",
+                frame_id=context.frame_id,
+                entity_id=pair_id,
+            ):
+                assessments.append(
+                    self.evaluator.evaluate(
+                        item.person,
+                        load_id=item.load_id,
+                        zones=item.zones,
+                        load_track_id=item.load_track_id,
+                    )
+                )
+        with log_pipeline_operation(
+            "risk", "aggregate_frame_risk", frame_id=context.frame_id
+        ):
+            frame_assessment = aggregate_frame_risk(
+                assessments,
+                frame_id=context.frame_id,
             )
-            for item in pair_inputs
-        )
-        frame_assessment = aggregate_frame_risk(
-            assessments,
-            frame_id=context.frame_id,
-        )
 
         event = None
         # Runtime event association is deferred until tracking is introduced.
         # Callers processing independent video frames explicitly disable it.
         if context.has_temporal_event and update_temporal_event:
-            event = self.state_machine.update(
-                RiskSignal(
-                    level=frame_assessment.level,
-                    assessment_reliable=frame_assessment.assessment_reliable,
-                    quality_reasons=frame_assessment.quality_reasons,
-                ),
-                event_key=context.scene_event_key,
-                event_scope=EventScope.SCENE,
-                timestamp=context.timestamp,
-            )
+            with log_pipeline_operation(
+                "risk", "update_event_state", frame_id=context.frame_id
+            ):
+                event = self.state_machine.update(
+                    RiskSignal(
+                        level=frame_assessment.level,
+                        assessment_reliable=frame_assessment.assessment_reliable,
+                        quality_reasons=frame_assessment.quality_reasons,
+                    ),
+                    event_key=context.scene_event_key,
+                    event_scope=EventScope.SCENE,
+                    timestamp=context.timestamp,
+                )
         return RiskFrameResult(assessment=frame_assessment, event=event)
 
 

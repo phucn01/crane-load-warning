@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from time import perf_counter
 from typing import Any
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,12 +16,20 @@ from starlette.staticfiles import StaticFiles
 
 from app.api.v1 import detection, health, jobs
 from app.core.config import Settings
-from app.core.logging import configure_logging
+from app.core.logging import (
+    bind_request_id,
+    configure_logging,
+    log_operation,
+    reset_request_id,
+)
 from app.repositories import VideoJobRepository
 from app.services.image_processing_service import ImageProcessingService
 from app.services.video_processing_service import VideoProcessingService
 from app.services.video_transcoding_service import BrowserVideoConverter
 from app.workers import VideoWorker
+
+LOGGER = logging.getLogger(__name__)
+API_LOG_SEPARATOR = "=" * 100
 
 
 def create_app(
@@ -39,9 +50,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        LOGGER.info("=== APPLICATION STARTING ===")
         service = image_processing_service
-        if service is None:
-            service = ImageProcessingService.from_settings(resolved_settings)
+        with log_operation(LOGGER, "initialize_image_processing_service"):
+            if service is None:
+                service = ImageProcessingService.from_settings(resolved_settings)
         application.state.image_processing_service = service
         application.state.video_job_repository = repository
         application.state.video_upload_root = upload_root
@@ -65,11 +78,15 @@ def create_app(
         )
         application.state.video_worker = worker
         if resolved_settings.preload_models:
-            await run_in_threadpool(service.preload_models)
+            with log_operation(LOGGER, "preload_models"):
+                await run_in_threadpool(service.preload_models)
+        LOGGER.info("=== APPLICATION STARTED ===")
         try:
             yield
         finally:
-            await run_in_threadpool(worker.close)
+            with log_operation(LOGGER, "shutdown_video_worker"):
+                await run_in_threadpool(worker.close)
+            LOGGER.info("=== APPLICATION STOPPED ===")
 
     configure_logging()
     application = FastAPI(
@@ -79,6 +96,46 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.settings = resolved_settings
+
+    @application.middleware("http")
+    async def log_http_request(request: Any, call_next: Any) -> Any:
+        request_id = uuid4().hex
+        token = bind_request_id(request_id)
+        started = perf_counter()
+        LOGGER.info(API_LOG_SEPARATOR)
+        LOGGER.info(
+            "=== HTTP START ===\n    METHOD       : %s\n    PATH         : %s",
+            request.method,
+            request.url.path,
+        )
+        try:
+            response = await call_next(request)
+        except Exception as error:
+            LOGGER.exception(
+                "=== HTTP ERROR ===\n    METHOD       : %s\n    PATH         : %s\n"
+                "    DURATION_MS  : %.3f\n    ERROR_TYPE   : %s",
+                request.method,
+                request.url.path,
+                (perf_counter() - started) * 1000.0,
+                type(error).__name__,
+            )
+            LOGGER.info(API_LOG_SEPARATOR)
+            raise
+        else:
+            response.headers["X-Request-ID"] = request_id
+            LOGGER.info(
+                "=== HTTP END ===\n    METHOD       : %s\n    PATH         : %s\n"
+                "    STATUS_CODE  : %s\n    DURATION_MS  : %.3f",
+                request.method,
+                request.url.path,
+                response.status_code,
+                (perf_counter() - started) * 1000.0,
+            )
+            LOGGER.info(API_LOG_SEPARATOR)
+            return response
+        finally:
+            reset_request_id(token)
+
     application.add_middleware(
         CORSMiddleware,
         allow_origins=list(resolved_settings.cors_origins),

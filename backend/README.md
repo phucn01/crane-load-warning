@@ -125,6 +125,17 @@ Optional environment settings:
 - `CRANE_PRELOAD_MODELS`
 - `CRANE_CORS_ORIGINS` (comma-separated exact origins; no wildcard)
 - `CRANE_LOG_LEVEL`
+- `CRANE_LOG_FILE` (default `backend/logs/backend.log`)
+- `CRANE_LOG_MAX_BYTES` (default `10485760`, then the file rotates)
+- `CRANE_LOG_BACKUP_COUNT` (default `5` rotated files)
+
+The API writes the same structured logs to stdout and the rotating log file.
+Every HTTP request receives an `X-Request-ID`; that ID is included in its log
+lines. Timed operations use visually separated `=== START ===`, `=== END ===`,
+and `=== ERROR ===` records with uppercase field names and `DURATION_MS`. Image logs
+cover upload validation/read/decode, each vision model, geometry, risk,
+annotation, and evidence persistence. Video logs additionally include each
+frame, risk-segment lifecycle, report generation, and FFmpeg transcoding.
 
 Frame-local `person_id` and `load_id` values in a response are explanatory
 labels only. Tracking and stable cross-frame IDs are intentionally not part of

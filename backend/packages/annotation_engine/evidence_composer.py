@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 from geometry_engine import GeometryFrameResult, PseudoBEVPoint, PseudoBEVRectangle
 from numpy.typing import NDArray
-from pipeline_timeline import PipelineTimeline
+from pipeline_timeline import PipelineTimeline, log_pipeline_operation
 from risk_engine import (
     EventDecision,
     FrameRiskAssessment,
@@ -50,12 +50,15 @@ class OfflineEvidenceComposer:
         """Render the one BEV representation shared by all evidence outputs."""
 
         width, height = self.pseudo_bev_size
-        return render_pseudo_bev_chart(
-            geometry,
-            assessment,
-            width=width,
-            height=height,
-        )
+        with log_pipeline_operation(
+            "annotation", "render_pseudo_bev", frame_id=assessment.frame_id
+        ):
+            return render_pseudo_bev_chart(
+                geometry,
+                assessment,
+                width=width,
+                height=height,
+            )
 
     def compose(
         self,
@@ -104,23 +107,29 @@ class OfflineEvidenceComposer:
     ) -> NDArray[np.uint8]:
 
         _validate_frame_identity(geometry, risk_result.assessment, context)
-        image_overlay = render_image_overlay(
-            image_bgr,
-            tuple(detections),
-            risk_result.assessment,
-        )
+        with log_pipeline_operation(
+            "annotation", "render_evidence_rgb", frame_id=context.frame_id
+        ):
+            image_overlay = render_image_overlay(
+                image_bgr,
+                tuple(detections),
+                risk_result.assessment,
+            )
         pseudo_bev_overlay = self.render_pseudo_bev(
             geometry,
             risk_result.assessment,
         )
-        return compose_evidence_image(
-            image_overlay,
-            pseudo_bev_overlay,
-            assessment=risk_result.assessment,
-            context=context,
-            traceability=traceability,
-            panel_size=self.pseudo_bev_size,
-        )
+        with log_pipeline_operation(
+            "annotation", "compose_evidence_panels", frame_id=context.frame_id
+        ):
+            return compose_evidence_image(
+                image_overlay,
+                pseudo_bev_overlay,
+                assessment=risk_result.assessment,
+                context=context,
+                traceability=traceability,
+                panel_size=self.pseudo_bev_size,
+            )
 
     def write(
         self,
@@ -194,23 +203,30 @@ class OfflineEvidenceComposer:
             if existing:
                 raise FileExistsError(f"evidence artifact already exists: {existing[0]}")
 
-        encoded, png = cv2.imencode(".png", composed)
-        if not encoded:
-            raise OSError("could not encode evidence image as PNG")
-        payload = build_assessment_payload(
-            geometry=geometry,
-            risk_result=risk_result,
-            context=context,
-            traceability=traceability,
-            evidence_image_ref=image_path.name,
-        )
-        json_bytes = (
-            json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
-        ).encode("utf-8")
+        with log_pipeline_operation(
+            "annotation", "encode_evidence", frame_id=context.frame_id
+        ):
+            encoded, png = cv2.imencode(".png", composed)
+            if not encoded:
+                raise OSError("could not encode evidence image as PNG")
+            payload = build_assessment_payload(
+                geometry=geometry,
+                risk_result=risk_result,
+                context=context,
+                traceability=traceability,
+                evidence_image_ref=image_path.name,
+            )
+            json_bytes = (
+                json.dumps(payload, indent=2, ensure_ascii=False, allow_nan=False)
+                + "\n"
+            ).encode("utf-8")
 
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        image_path.write_bytes(png.tobytes())
-        json_path.write_bytes(json_bytes)
+        with log_pipeline_operation(
+            "annotation", "persist_evidence", frame_id=context.frame_id
+        ):
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            image_path.write_bytes(png.tobytes())
+            json_path.write_bytes(json_bytes)
         return EvidenceArtifacts(image_path, json_path)
 
 

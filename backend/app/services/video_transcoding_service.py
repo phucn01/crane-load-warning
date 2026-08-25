@@ -31,6 +31,10 @@ class BrowserVideoConverter:
 
     def convert(self, path: Path) -> VideoCompatibility:
         if self.ffmpeg_executable is None:
+            LOGGER.warning(
+                "=== WARNING | VIDEO_TRANSCODE_SKIPPED | "
+                "REASON=FFMPEG_UNAVAILABLE ==="
+            )
             return _mp4v_fallback("FFmpeg is unavailable; browser playback may fail")
 
         temporary = path.with_name(f".{path.stem}.h264.tmp.mp4")
@@ -69,19 +73,30 @@ class BrowserVideoConverter:
             )
             if completed.returncode != 0 or not temporary.is_file():
                 detail = completed.stderr.decode("utf-8", errors="replace").strip()
-                LOGGER.warning("FFmpeg H.264 conversion failed: %s", detail[-500:])
+                LOGGER.warning(
+                    "=== ERROR | OPERATION=VIDEO_TRANSCODE | DETAIL=%s ===",
+                    detail[-500:],
+                )
                 return _mp4v_fallback("H.264 conversion failed; browser playback may fail")
             if temporary.stat().st_size <= 0:
                 return _mp4v_fallback(
                     "H.264 conversion produced an empty file; browser playback may fail"
                 )
             temporary.replace(path)
+            LOGGER.info(
+                "=== END | OPERATION=VIDEO_TRANSCODE | CODEC=H264 | "
+                "OUTPUT_BYTES=%s ===",
+                path.stat().st_size,
+            )
             return VideoCompatibility(
                 codec="h264",
                 browser_playback_compatible=True,
             )
         except (OSError, subprocess.SubprocessError) as error:
-            LOGGER.warning("FFmpeg H.264 conversion could not run: %s", type(error).__name__)
+            LOGGER.warning(
+                "=== ERROR | OPERATION=VIDEO_TRANSCODE | ERROR_TYPE=%s ===",
+                type(error).__name__,
+            )
             return _mp4v_fallback("H.264 conversion could not run; browser playback may fail")
         finally:
             temporary.unlink(missing_ok=True)
@@ -92,7 +107,9 @@ def _resolve_executable(explicit_path: Path | None) -> Path | None:
         resolved = explicit_path.resolve()
         if resolved.is_file():
             return resolved
-        LOGGER.warning("configured FFmpeg executable was not found: %s", resolved)
+        LOGGER.warning(
+            "=== WARNING | FFMPEG_NOT_FOUND | PATH=%s ===", resolved
+        )
     system_executable = shutil.which("ffmpeg")
     if system_executable:
         return Path(system_executable).resolve()

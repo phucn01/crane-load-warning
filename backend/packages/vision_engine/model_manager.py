@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable, Mapping
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from threading import Lock
-from typing import Any, Callable, Mapping
+from time import perf_counter
+from typing import Any
 
 from .depth import DepthAnythingV3, DepthAnythingV3Config
 from .detectors import (
@@ -15,9 +18,9 @@ from .detectors import (
     YOLOPersonSegmenterConfig,
 )
 
-
 ModelFactory = Callable[[], Any]
 WarmupCallback = Callable[[Any], None]
+LOGGER = logging.getLogger(__name__)
 
 
 class ModelManager:
@@ -47,17 +50,36 @@ class ModelManager:
     def get(self, name: str) -> Any:
         with self._lock:
             if name in self._instances:
+                LOGGER.debug("model_cache_hit model=%s", name)
                 return self._instances[name]
             if name not in self._factories:
                 raise KeyError(f"model is not registered: {name}")
 
-            instance = self._factories[name]()
-            if hasattr(instance, "load"):
-                instance.load()
-            warmup = self._warmups[name]
-            if warmup is not None:
-                warmup(instance)
-            self._instances[name] = instance
+            LOGGER.info("=== START | COMPONENT=VISION | OPERATION=MODEL_LOAD | MODEL=%s ===", name)
+            started = perf_counter()
+            try:
+                instance = self._factories[name]()
+                if hasattr(instance, "load"):
+                    instance.load()
+                warmup = self._warmups[name]
+                if warmup is not None:
+                    warmup(instance)
+                self._instances[name] = instance
+            except BaseException as error:
+                LOGGER.exception(
+                    "=== ERROR | COMPONENT=VISION | OPERATION=MODEL_LOAD | "
+                    "MODEL=%s | DURATION_MS=%.3f | ERROR_TYPE=%s ===",
+                    name,
+                    (perf_counter() - started) * 1000.0,
+                    type(error).__name__,
+                )
+                raise
+            LOGGER.info(
+                "=== END | COMPONENT=VISION | OPERATION=MODEL_LOAD | MODEL=%s | "
+                "DURATION_MS=%.3f ===",
+                name,
+                (perf_counter() - started) * 1000.0,
+            )
             return instance
 
     def load_all(self) -> None:

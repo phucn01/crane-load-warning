@@ -16,6 +16,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from app.core.logging import log_operation
 from app.models import FrameEvidence, JobStatus, RiskSegment
 from app.repositories import VideoJobRepository
 from app.schemas.detection import RiskLevelValue
@@ -144,6 +145,13 @@ class _RiskSegmentRecorder:
         risk_level: RiskLevelValue,
     ) -> None:
         segment_id = uuid4().hex
+        LOGGER.info(
+            "=== START | OPERATION=RISK_SEGMENT | SEGMENT_ID=%s | "
+            "START_FRAME=%s | RISK_LEVEL=%s ===",
+            segment_id,
+            frame_number,
+            risk_level,
+        )
         self.output_root.mkdir(parents=True, exist_ok=True)
         output_path = self.output_root / f"{segment_id}.mp4"
         writer = cv2.VideoWriter(
@@ -261,6 +269,14 @@ class _RiskSegmentRecorder:
             active.output_path.unlink(missing_ok=True)
             raise
         self._active = None
+        LOGGER.info(
+            "=== END | OPERATION=RISK_SEGMENT | SEGMENT_ID=%s | "
+            "START_FRAME=%s | END_FRAME=%s | MAX_RISK_LEVEL=%s ===",
+            segment.segment_id,
+            segment.start_frame,
+            segment.end_frame,
+            segment.max_risk_level,
+        )
         return segment
 
     def _persist_evidence(
@@ -353,37 +369,50 @@ class VideoProcessingService:
     def process(self, job_id: str) -> None:
         job = self.repository.get(job_id)
         if job is None:
+            LOGGER.warning("=== WARNING | VIDEO_JOB_NOT_FOUND | JOB_ID=%s ===", job_id)
             return
 
         capture: cv2.VideoCapture | None = None
         writer: cv2.VideoWriter | None = None
         segment_recorder: _RiskSegmentRecorder | None = None
         started_clock = perf_counter()
+        LOGGER.info("=== START | OPERATION=VIDEO_JOB_PROCESSING | JOB_ID=%s ===", job_id)
         try:
-            capture = cv2.VideoCapture(str(job.input_path))
-            if not capture.isOpened():
-                raise ValueError("uploaded video could not be opened")
+            with log_operation(LOGGER, "open_source_video", job_id=job_id):
+                capture = cv2.VideoCapture(str(job.input_path))
+                if not capture.isOpened():
+                    raise ValueError("uploaded video could not be opened")
 
-            width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            total_frames = max(0, int(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
-            source_fps = float(capture.get(cv2.CAP_PROP_FPS))
-            if not math.isfinite(source_fps) or source_fps <= 0.0:
-                source_fps = 25.0
-            if width <= 0 or height <= 0:
-                raise ValueError("uploaded video has invalid frame dimensions")
+                width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+                height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                total_frames = max(0, int(capture.get(cv2.CAP_PROP_FRAME_COUNT)))
+                source_fps = float(capture.get(cv2.CAP_PROP_FPS))
+                if not math.isfinite(source_fps) or source_fps <= 0.0:
+                    source_fps = 25.0
+                if width <= 0 or height <= 0:
+                    raise ValueError("uploaded video has invalid frame dimensions")
 
             job.output_path.parent.mkdir(parents=True, exist_ok=True)
-            writer = cv2.VideoWriter(
-                str(job.output_path),
-                cv2.VideoWriter_fourcc(*self.output_fourcc),
-                source_fps,
-                (width, height),
-            )
-            if not writer.isOpened():
-                raise OSError(
-                    f"output video writer could not open codec {self.output_fourcc}"
+            with log_operation(LOGGER, "open_output_video", job_id=job_id):
+                writer = cv2.VideoWriter(
+                    str(job.output_path),
+                    cv2.VideoWriter_fourcc(*self.output_fourcc),
+                    source_fps,
+                    (width, height),
                 )
+                if not writer.isOpened():
+                    raise OSError(
+                        f"output video writer could not open codec {self.output_fourcc}"
+                    )
+            LOGGER.info(
+                "=== EVENT | VIDEO_METADATA | JOB_ID=%s | WIDTH=%s | HEIGHT=%s | "
+                "SOURCE_FPS=%.3f | TOTAL_FRAMES=%s ===",
+                job_id,
+                width,
+                height,
+                source_fps,
+                total_frames,
+            )
 
             segment_recorder = _RiskSegmentRecorder(
                 output_root=(
@@ -407,6 +436,7 @@ class VideoProcessingService:
             processed = 0
 
             while True:
+                frame_started = perf_counter()
                 readable, frame = capture.read()
                 if not readable:
                     break
@@ -455,6 +485,17 @@ class VideoProcessingService:
                     warning_frame_count=counts["WARNING"],
                     danger_frame_count=counts["DANGER"],
                 )
+                LOGGER.info(
+                    "=== END | OPERATION=VIDEO_FRAME | JOB_ID=%s | FRAME=%s | "
+                    "TOTAL_FRAMES=%s | DURATION_MS=%.3f | RISK_LEVEL=%s | "
+                    "PROGRESS=%.2f ===",
+                    job_id,
+                    processed,
+                    total_frames,
+                    (perf_counter() - frame_started) * 1000.0,
+                    risk,
+                    progress,
+                )
 
             if processed == 0:
                 raise ValueError("uploaded video contains no readable frames")
@@ -464,8 +505,10 @@ class VideoProcessingService:
             # Finalize the MP4 container before the completed result becomes visible.
             writer.release()
             writer = None
-            full_compatibility = self.video_converter.convert(job.output_path)
-            self._finalize_segment_codecs(job_id)
+            with log_operation(LOGGER, "transcode_full_video", job_id=job_id):
+                full_compatibility = self.video_converter.convert(job.output_path)
+            with log_operation(LOGGER, "transcode_risk_segments", job_id=job_id):
+                self._finalize_segment_codecs(job_id)
             elapsed = max(perf_counter() - started_clock, 1e-9)
             completion_changes = {
                 "status": JobStatus.COMPLETED,
@@ -485,10 +528,26 @@ class VideoProcessingService:
             if current is None:
                 raise KeyError(job_id)
             completed_job = current.with_changes(**completion_changes)
-            write_video_report(completed_job)
+            with log_operation(LOGGER, "write_video_report", job_id=job_id):
+                write_video_report(completed_job)
             self.repository.update(job_id, **completion_changes)
+            LOGGER.info(
+                "=== END | OPERATION=VIDEO_JOB_PROCESSING | JOB_ID=%s | "
+                "DURATION_MS=%.3f | PROCESSED_FRAMES=%s | AVERAGE_FPS=%.3f | "
+                "MAX_RISK_LEVEL=%s ===",
+                job_id,
+                elapsed * 1000.0,
+                processed,
+                processed / elapsed,
+                max_risk,
+            )
         except Exception as error:
-            LOGGER.exception("video job %s failed: %s", job_id, type(error).__name__)
+            LOGGER.exception(
+                "=== ERROR | OPERATION=VIDEO_JOB_PROCESSING | JOB_ID=%s | "
+                "ERROR_TYPE=%s ===",
+                job_id,
+                type(error).__name__,
+            )
             elapsed = max(perf_counter() - started_clock, 0.0)
             self.repository.update(
                 job_id,
