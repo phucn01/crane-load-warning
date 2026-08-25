@@ -1,12 +1,5 @@
 export type RiskLevel = "SAFE" | "WARNING" | "DANGER";
 
-export type AnalysisState =
-  | "idle"
-  | "selected"
-  | "processing"
-  | "success"
-  | "error";
-
 export interface BoundingBox {
   x1: number;
   y1: number;
@@ -129,4 +122,138 @@ export interface ImageDetectionResponse {
   geometry: GeometryResponse;
   evidence: EvidenceResponse;
   metadata: ProcessingMetadata;
+}
+
+export type VideoJobStatus = "queued" | "processing" | "completed" | "failed";
+
+export interface VideoJobCreated {
+  job_id: string;
+  status: "queued";
+  status_url: string;
+  stream_url: string;
+  result_url: string;
+}
+
+export interface VideoSummary {
+  processed_frames: number;
+  safe_frames: number;
+  warning_frames: number;
+  danger_frames: number;
+  max_risk_level: RiskLevel | null;
+  average_processing_fps: number;
+  risk_segment_count: number;
+}
+
+export interface RiskSegment {
+  segment_id: string;
+  start_frame: number;
+  end_frame: number;
+  risk_start_frame: number;
+  risk_end_frame: number;
+  start_seconds: number;
+  end_seconds: number;
+  max_risk_level: "WARNING" | "DANGER";
+  warning_frame_count: number;
+  danger_frame_count: number;
+  frame_evidence: VideoFrameEvidence[];
+  result_url: string;
+  output_codec: string;
+  browser_playback_compatible: boolean;
+  playback_warning: string | null;
+}
+
+export interface VideoFrameEvidence {
+  frame_number: number;
+  timestamp_seconds: number;
+  risk_level: "WARNING" | "DANGER";
+  original_url: string;
+  rgb_url: string;
+  pseudo_bev_url: string;
+}
+
+export interface VideoJob {
+  job_id: string;
+  status: VideoJobStatus;
+  input_path: string;
+  output_path: string;
+  current_frame: number;
+  total_frames: number;
+  progress: number;
+  processing_fps: number;
+  elapsed_seconds: number;
+  current_risk_level: RiskLevel | null;
+  max_risk_level: RiskLevel | null;
+  safe_frame_count: number;
+  warning_frame_count: number;
+  danger_frame_count: number;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  stream_url: string;
+  result_url: string | null;
+  download_url: string | null;
+  report_url: string | null;
+  summary: VideoSummary | null;
+  risk_segments: RiskSegment[];
+  output_codec: string;
+  browser_playback_compatible: boolean;
+  playback_warning: string | null;
+}
+
+export interface VideoReportEvidence {
+  frame_number: number;
+  timestamp_seconds: number;
+  risk_level: "WARNING" | "DANGER";
+  original_url: string;
+  rgb_url: string;
+  pseudo_bev_url: string;
+}
+
+export interface VideoReportSegment {
+  segment_id: string;
+  start_frame: number;
+  end_frame: number;
+  risk_start_frame: number;
+  risk_end_frame: number;
+  start_seconds: number;
+  end_seconds: number;
+  max_risk_level: "WARNING" | "DANGER";
+  warning_frame_count: number;
+  danger_frame_count: number;
+  result_url: string;
+  codec: string;
+  browser_playback_compatible: boolean;
+  playback_warning: string | null;
+  evidence: VideoReportEvidence[];
+}
+
+export interface VideoReport {
+  schema_version: string;
+  job_id: string;
+  status: "completed";
+  created_at: string;
+  started_at: string | null;
+  completed_at: string;
+  input_filename: string;
+  summary: {
+    processed_frames: number;
+    total_frames: number;
+    safe_frames: number;
+    warning_frames: number;
+    danger_frames: number;
+    max_risk_level: RiskLevel | null;
+    average_processing_fps: number;
+    elapsed_seconds: number;
+    risk_segment_count: number;
+  };
+  video: {
+    filename: string;
+    url: string;
+    download_url: string;
+    codec: string;
+    browser_playback_compatible: boolean;
+    playback_warning: string | null;
+  };
+  risk_segments: VideoReportSegment[];
 }

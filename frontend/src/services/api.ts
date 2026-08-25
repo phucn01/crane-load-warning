@@ -1,4 +1,9 @@
-import type { ImageDetectionResponse } from "../types/detection";
+import type {
+  ImageDetectionResponse,
+  VideoJob,
+  VideoJobCreated,
+  VideoReport,
+} from "../types/detection";
 
 const DEFAULT_API_BASE_URL = "http://localhost:8000";
 
@@ -56,6 +61,55 @@ export function evidenceUrl(path: string | null): string | null {
   if (!path) return null;
   if (/^https?:\/\//i.test(path)) return path;
   return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
+export const apiUrl = evidenceUrl;
+
+export async function uploadVideo(
+  file: File,
+  signal?: AbortSignal,
+): Promise<VideoJobCreated> {
+  const form = new FormData();
+  form.append("file", file);
+  return requestJson<VideoJobCreated>("/api/v1/detection/video", {
+    method: "POST",
+    body: form,
+    signal,
+  });
+}
+
+export async function getVideoJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<VideoJob> {
+  return requestJson<VideoJob>(`/api/v1/jobs/${encodeURIComponent(jobId)}`, {
+    signal,
+  });
+}
+
+export async function getVideoReport(jobId: string): Promise<VideoReport> {
+  return requestJson<VideoReport>(
+    `/api/v1/jobs/${encodeURIComponent(jobId)}/report`,
+    {},
+  );
+}
+
+async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, init);
+  } catch (error: unknown) {
+    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    throw new ApiError(
+      "Cannot reach the analysis service. Check that the backend is running.",
+      0,
+    );
+  }
+  if (!response.ok) {
+    const payload = await readErrorPayload(response);
+    throw new ApiError(errorMessage(payload, response.status), response.status);
+  }
+  return (await response.json()) as T;
 }
 
 async function readErrorPayload(response: Response): Promise<ErrorPayload | null> {
