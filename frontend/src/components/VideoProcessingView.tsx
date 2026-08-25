@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 
-import { ApiError, getVideoJob } from "../services/api";
-import type { VideoJob, VideoJobCreated, VideoJobStatus } from "../types/detection";
+import { ApiError, getVideoFrameResults, getVideoJob } from "../services/api";
+import type {
+  VideoFrameRiskResult,
+  VideoJob,
+  VideoJobCreated,
+  VideoJobStatus,
+} from "../types/detection";
 import LivePreview from "./LivePreview";
 import ProcessingProgress from "./ProcessingProgress";
 import VideoResult from "./VideoResult";
@@ -15,18 +20,41 @@ interface Props {
 
 export default function VideoProcessingView({ created, onStatusChange }: Props) {
   const [job, setJob] = useState<VideoJob | null>(null);
+  const [frameResults, setFrameResults] = useState<VideoFrameRiskResult[]>([]);
   const [pollError, setPollError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     let timeoutId: number | undefined;
     let controller: AbortController | null = null;
+    let afterFrame = 0;
+
+    const collectAvailableFrameResults = async (signal: AbortSignal) => {
+      const collected: VideoFrameRiskResult[] = [];
+      let hasMore = true;
+      while (hasMore) {
+        const page = await getVideoFrameResults(
+          created.job_id,
+          afterFrame,
+          1000,
+          signal,
+        );
+        collected.push(...page.items);
+        afterFrame = page.next_after_frame;
+        hasMore = page.has_more && page.items.length > 0;
+      }
+      return collected;
+    };
 
     const poll = async () => {
       controller = new AbortController();
       try {
         const next = await getVideoJob(created.job_id, controller.signal);
+        const newFrameResults = await collectAvailableFrameResults(controller.signal);
         if (!active) return;
+        if (newFrameResults.length > 0) {
+          setFrameResults((current) => [...current, ...newFrameResults]);
+        }
         setJob(next);
         setPollError(null);
         onStatusChange?.(next.status);
@@ -59,7 +87,9 @@ export default function VideoProcessingView({ created, onStatusChange }: Props) 
       </section>
     );
   }
-  if (job.status === "completed") return <VideoResult job={job} />;
+  if (job.status === "completed") {
+    return <VideoResult job={job} frameResults={frameResults} />;
+  }
 
   return (
     <section className="video-processing" aria-live="polite">

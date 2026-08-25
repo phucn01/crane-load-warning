@@ -17,7 +17,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.core.logging import log_operation
-from app.models import FrameEvidence, JobStatus, RiskSegment
+from app.models import FrameEvidence, FrameRiskResult, JobStatus, RiskSegment
 from app.repositories import VideoJobRepository
 from app.schemas.detection import RiskLevelValue
 from app.services.image_processing_service import ProcessedFrame
@@ -441,12 +441,21 @@ class VideoProcessingService:
                 if not readable:
                     break
                 processed += 1
+                timestamp_seconds = (processed - 1) / source_fps
+                LOGGER.info(
+                    "=== EVENT | VIDEO_FRAME_POSITION | JOB_ID=%s | FRAME=%s | "
+                    "TIMESTAMP_SECONDS=%.3f | SOURCE_FPS=%.3f ===",
+                    job_id,
+                    processed,
+                    timestamp_seconds,
+                    source_fps,
+                )
                 original = frame.copy()
                 assessed = self.frame_processor.process_video_frame(
                     frame,
                     upload_id=job_id,
                     frame_index=processed - 1,
-                    timestamp=(processed - 1) / source_fps,
+                    timestamp=timestamp_seconds,
                 )
                 annotated = _source_sized_frame(assessed.annotated_bgr, width, height)
                 writer.write(annotated)
@@ -454,6 +463,14 @@ class VideoProcessingService:
                 self.repository.set_preview(job_id, processed, preview)
 
                 risk = assessed.risk_level.value
+                self.repository.append_frame_result(
+                    job_id,
+                    FrameRiskResult(
+                        frame_number=processed,
+                        timestamp_seconds=timestamp_seconds,
+                        risk_level=risk,
+                    ),
+                )
                 segment = segment_recorder.accept(
                     frame_number=processed,
                     original=original,

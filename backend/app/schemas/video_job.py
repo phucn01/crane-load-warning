@@ -17,6 +17,7 @@ class VideoJobCreatedResponse(StrictSchema):
     status: Literal["queued"] = "queued"
     status_url: str
     stream_url: str
+    frame_results_url: str
     result_url: str
 
 
@@ -37,6 +38,20 @@ class FrameEvidenceResponse(StrictSchema):
     original_url: str
     rgb_url: str
     pseudo_bev_url: str
+
+
+class FrameRiskResultResponse(StrictSchema):
+    frame_number: int = Field(ge=1)
+    timestamp_seconds: float = Field(ge=0.0)
+    risk_level: RiskLevelValue
+
+
+class FrameRiskResultsResponse(StrictSchema):
+    job_id: str
+    job_status: JobStatusValue
+    items: list[FrameRiskResultResponse]
+    next_after_frame: int = Field(ge=0)
+    has_more: bool
 
 
 class RiskSegmentResponse(StrictSchema):
@@ -77,6 +92,7 @@ class VideoJobResponse(StrictSchema):
     started_at: datetime | None
     completed_at: datetime | None
     stream_url: str
+    frame_results_url: str
     result_url: str | None
     download_url: str | None
     report_url: str | None
@@ -89,6 +105,8 @@ class VideoJobResponse(StrictSchema):
 
 __all__ = [
     "FrameEvidenceResponse",
+    "FrameRiskResultResponse",
+    "FrameRiskResultsResponse",
     "JobStatusValue",
     "RiskSegmentResponse",
     "VideoJobCreatedResponse",

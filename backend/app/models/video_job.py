@@ -30,6 +30,15 @@ class FrameEvidence:
 
 
 @dataclass(frozen=True, slots=True)
+class FrameRiskResult:
+    """Public, lightweight risk classification for one processed video frame."""
+
+    frame_number: int
+    timestamp_seconds: float
+    risk_level: RiskLevelValue
+
+
+@dataclass(frozen=True, slots=True)
 class RiskSegment:
     """A padded clip around contiguous non-safe frame classifications."""
 

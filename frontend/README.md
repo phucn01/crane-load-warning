@@ -46,11 +46,18 @@ After a video upload the page polls the in-memory job every
 `completed` or `failed`, and uses HTML5 `<video controls>` for the result.
 Preview frames are not playback at source FPS, and SAFE/WARNING/DANGER counts
 describe independently assessed frames rather than safety events.
-Completed results also list directly written WARNING/DANGER clips with 2-second
-pre-roll and post-roll context by default. Each clip can open a popup containing
-the annotated frame and Pseudo-BEV for up to three representative risk frames
-(first, highest-risk, and last). These clips and images are frame-level risk
-evidence, not tracked safety events.
+Completed results fetch the paginated frame-risk feed and merge adjacent frames
+into an interactive SAFE/WARNING/DANGER timeline synchronized with the main
+video. Timeline ranges and evidence markers seek the player to their exact
+timestamps. WARNING/DANGER clips retain 2-second pre-roll and post-roll context
+by default, but are shown as lightweight review cards rather than separate
+embedded players. Each card can jump the main player to its risk start, open the
+saved clip, or show annotated/Pseudo-BEV evidence for up to three representative
+risk frames (first, highest-risk, and last). These clips and images are
+frame-level risk evidence, not tracked safety events.
+The dedicated video report reuses the same frame-risk timeline with a compact
+segment review queue, a three-view evidence panel, interpretation notes, and a
+print layout that removes interactive controls.
 The backend normally finalizes generated files as H.264/yuv420p/faststart for
 HTML5 playback. When it must fall back to `mp4v`, the result view displays a
 codec compatibility warning.

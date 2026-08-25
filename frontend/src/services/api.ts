@@ -2,6 +2,7 @@ import type {
   ImageDetectionResponse,
   VideoJob,
   VideoJobCreated,
+  VideoFrameRiskResultsPage,
   VideoReport,
 } from "../types/detection";
 
@@ -85,6 +86,38 @@ export async function getVideoJob(
   return requestJson<VideoJob>(`/api/v1/jobs/${encodeURIComponent(jobId)}`, {
     signal,
   });
+}
+
+export async function getVideoFrameResults(
+  jobId: string,
+  afterFrame: number,
+  limit = 1000,
+  signal?: AbortSignal,
+): Promise<VideoFrameRiskResultsPage> {
+  const query = new URLSearchParams({
+    after_frame: String(afterFrame),
+    limit: String(limit),
+  });
+  return requestJson<VideoFrameRiskResultsPage>(
+    `/api/v1/jobs/${encodeURIComponent(jobId)}/frames?${query}`,
+    { signal },
+  );
+}
+
+export async function getAllVideoFrameResults(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<VideoFrameRiskResultsPage["items"]> {
+  const results: VideoFrameRiskResultsPage["items"] = [];
+  let afterFrame = 0;
+  let hasMore = true;
+  while (hasMore) {
+    const page = await getVideoFrameResults(jobId, afterFrame, 1000, signal);
+    results.push(...page.items);
+    afterFrame = page.next_after_frame;
+    hasMore = page.has_more && page.items.length > 0;
+  }
+  return results;
 }
 
 export async function getVideoReport(jobId: string): Promise<VideoReport> {

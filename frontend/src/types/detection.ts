@@ -131,7 +131,22 @@ export interface VideoJobCreated {
   status: "queued";
   status_url: string;
   stream_url: string;
+  frame_results_url: string;
   result_url: string;
+}
+
+export interface VideoFrameRiskResult {
+  frame_number: number;
+  timestamp_seconds: number;
+  risk_level: RiskLevel;
+}
+
+export interface VideoFrameRiskResultsPage {
+  job_id: string;
+  job_status: VideoJobStatus;
+  items: VideoFrameRiskResult[];
+  next_after_frame: number;
+  has_more: boolean;
 }
 
 export interface VideoSummary {
@@ -191,6 +206,7 @@ export interface VideoJob {
   started_at: string | null;
   completed_at: string | null;
   stream_url: string;
+  frame_results_url: string;
   result_url: string | null;
   download_url: string | null;
   report_url: string | null;

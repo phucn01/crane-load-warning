@@ -122,6 +122,9 @@ def test_video_job_processes_frames_and_exposes_result(tmp_path: Path) -> None:
         assert created.status_code == 202
         job_id = created.json()["job_id"]
         assert created.json()["status"] == "queued"
+        assert created.json()["frame_results_url"] == (
+            f"/api/v1/jobs/{job_id}/frames"
+        )
 
         job = _wait_for_terminal(client, job_id)
         assert job["status"] == "completed"
@@ -137,6 +140,43 @@ def test_video_job_processes_frames_and_exposes_result(tmp_path: Path) -> None:
         assert job["playback_warning"] is None
         assert job["summary"]["processed_frames"] == 3
         assert job["summary"]["risk_segment_count"] == 1
+        assert job["frame_results_url"] == f"/api/v1/jobs/{job_id}/frames"
+
+        first_page = client.get(
+            job["frame_results_url"], params={"after_frame": 0, "limit": 2}
+        )
+        assert first_page.status_code == 200
+        assert first_page.json() == {
+            "job_id": job_id,
+            "job_status": "completed",
+            "items": [
+                {
+                    "frame_number": 1,
+                    "timestamp_seconds": 0.0,
+                    "risk_level": "SAFE",
+                },
+                {
+                    "frame_number": 2,
+                    "timestamp_seconds": 1 / 12,
+                    "risk_level": "WARNING",
+                },
+            ],
+            "next_after_frame": 2,
+            "has_more": True,
+        }
+        second_page = client.get(
+            job["frame_results_url"], params={"after_frame": 2, "limit": 2}
+        )
+        assert second_page.status_code == 200
+        assert second_page.json()["items"] == [
+            {
+                "frame_number": 3,
+                "timestamp_seconds": 2 / 12,
+                "risk_level": "DANGER",
+            }
+        ]
+        assert second_page.json()["next_after_frame"] == 3
+        assert second_page.json()["has_more"] is False
         assert len(job["risk_segments"]) == 1
         segment = job["risk_segments"][0]
         assert segment["start_frame"] == 1

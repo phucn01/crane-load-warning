@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.api.dependencies import VideoJobRepositoryDep
 from app.models import JobStatus, RiskSegment, VideoJob
 from app.repositories import VideoJobRepository
-from app.schemas.video_job import VideoJobResponse
+from app.schemas.video_job import FrameRiskResultsResponse, VideoJobResponse
 
 router = APIRouter(prefix="/jobs", tags=["video-jobs"])
 BOUNDARY = "frame"
@@ -23,6 +24,37 @@ def get_job(
 ) -> VideoJobResponse:
     job = _required_job(repository, job_id)
     return _job_response(job)
+
+
+@router.get("/{job_id}/frames", response_model=FrameRiskResultsResponse)
+def get_frame_results(
+    job_id: str,
+    repository: VideoJobRepositoryDep,
+    after_frame: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 200,
+) -> FrameRiskResultsResponse:
+    """Return lightweight per-frame risk results using a frame cursor."""
+    job = _required_job(repository, job_id)
+    items, available_count = repository.frame_results_page(
+        job_id,
+        after_frame=after_frame,
+        limit=limit,
+    )
+    next_after_frame = items[-1].frame_number if items else after_frame
+    return FrameRiskResultsResponse(
+        job_id=job_id,
+        job_status=job.status.value,
+        items=[
+            {
+                "frame_number": item.frame_number,
+                "timestamp_seconds": item.timestamp_seconds,
+                "risk_level": item.risk_level,
+            }
+            for item in items
+        ],
+        next_after_frame=next_after_frame,
+        has_more=available_count > next_after_frame,
+    )
 
 
 @router.get("/{job_id}/stream")
@@ -309,6 +341,7 @@ def _job_response(job: VideoJob) -> VideoJobResponse:
             "started_at": job.started_at,
             "completed_at": job.completed_at,
             "stream_url": f"{prefix}/stream",
+            "frame_results_url": f"{prefix}/frames",
             "result_url": (
                 f"{prefix}/result" if job.status is JobStatus.COMPLETED else None
             ),

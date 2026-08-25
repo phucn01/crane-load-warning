@@ -114,6 +114,7 @@ async def detect_video(
             job_id=job.job_id,
             status_url=prefix,
             stream_url=f"{prefix}/stream",
+            frame_results_url=f"{prefix}/frames",
             result_url=f"{prefix}/result",
         )
     except HTTPException:

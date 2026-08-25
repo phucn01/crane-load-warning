@@ -87,6 +87,9 @@ Swagger UI is available at `http://127.0.0.1:8000/docs`. The v1 endpoints are:
 - `POST /api/v1/detection/video` with multipart field `file` (`mp4`, `mov`,
   `avi`, `mkv`, or `webm`); returns an in-memory job after upload
 - `GET /api/v1/jobs/{job_id}` for progress and frame-risk statistics
+- `GET /api/v1/jobs/{job_id}/frames?after_frame=0&limit=200` for ordered,
+  paginated per-frame risk results (`frame_number`, timestamp, and
+  `SAFE`/`WARNING`/`DANGER`); use `next_after_frame` as the next polling cursor
 - `GET /api/v1/jobs/{job_id}/stream` for the latest annotated processing frame
   as `multipart/x-mixed-replace` MJPEG
 - `GET /api/v1/jobs/{job_id}/result` for the completed annotated MP4

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { VideoReport } from "../types/detection";
@@ -68,14 +68,31 @@ describe("VideoReportPage", () => {
   });
 
   it("renders the persisted report summary and evidence", async () => {
+    const frameResults = [
+      { frame_number: 1, timestamp_seconds: 0, risk_level: "SAFE" },
+      { frame_number: 24, timestamp_seconds: 2.3, risk_level: "WARNING" },
+      { frame_number: 30, timestamp_seconds: 2.9, risk_level: "DANGER" },
+      { frame_number: 36, timestamp_seconds: 3.5, risk_level: "WARNING" },
+      { frame_number: 100, timestamp_seconds: 9.9, risk_level: "SAFE" },
+    ];
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify(report), {
+      vi.fn().mockImplementation((input: string) => {
+        const url = String(input);
+        const payload = url.includes("/frames?")
+          ? {
+              job_id: "job-1",
+              job_status: "completed",
+              items: frameResults,
+              next_after_frame: 100,
+              has_more: false,
+            }
+          : report;
+        return Promise.resolve(new Response(JSON.stringify(payload), {
           status: 200,
           headers: { "Content-Type": "application/json" },
-        }),
-      ),
+        }));
+      }),
     );
 
     render(<VideoReportPage jobId="job-1" />);
@@ -84,6 +101,7 @@ describe("VideoReportPage", () => {
     expect(screen.getByText("100")).toBeInTheDocument();
     expect(screen.getByText("70")).toBeInTheDocument();
     expect(screen.getByText("8 danger")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Risk timeline" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Annotated evidence frame 30" })).toHaveAttribute(
       "src",
       "http://localhost:8000/api/v1/jobs/job-1/segments/segment-1/evidence/30/rgb",
@@ -92,5 +110,10 @@ describe("VideoReportPage", () => {
       "href",
       "http://localhost:8000/api/v1/jobs/job-1/download",
     );
+
+    fireEvent.click(screen.getByRole("button", { name: /DANGER: frames 30 to 30/i }));
+    expect(document.querySelector("video")?.currentTime).toBe(2.9);
+    fireEvent.click(screen.getByRole("button", { name: "Open full evidence viewer" }));
+    expect(screen.getByRole("dialog", { name: "Frame 30 evidence" })).toBeInTheDocument();
   });
 });

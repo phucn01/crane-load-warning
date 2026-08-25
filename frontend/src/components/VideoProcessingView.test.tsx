@@ -1,7 +1,11 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { VideoJob, VideoJobCreated } from "../types/detection";
+import type {
+  VideoFrameRiskResult,
+  VideoJob,
+  VideoJobCreated,
+} from "../types/detection";
 import VideoProcessingView from "./VideoProcessingView";
 
 const created: VideoJobCreated = {
@@ -9,8 +13,18 @@ const created: VideoJobCreated = {
   status: "queued",
   status_url: "/api/v1/jobs/job-1",
   stream_url: "/api/v1/jobs/job-1/stream",
+  frame_results_url: "/api/v1/jobs/job-1/frames",
   result_url: "/api/v1/jobs/job-1/result",
 };
+
+const frameResults: VideoFrameRiskResult[] = [
+  { frame_number: 1, timestamp_seconds: 0, risk_level: "SAFE" },
+  { frame_number: 2, timestamp_seconds: 0.1, risk_level: "SAFE" },
+  { frame_number: 3, timestamp_seconds: 0.2, risk_level: "WARNING" },
+  { frame_number: 4, timestamp_seconds: 0.3, risk_level: "WARNING" },
+  { frame_number: 5, timestamp_seconds: 0.4, risk_level: "DANGER" },
+  { frame_number: 6, timestamp_seconds: 0.5, risk_level: "SAFE" },
+];
 
 function job(status: VideoJob["status"]): VideoJob {
   return {
@@ -33,6 +47,7 @@ function job(status: VideoJob["status"]): VideoJob {
     started_at: "2026-08-25T00:00:01Z",
     completed_at: status === "completed" || status === "failed" ? "2026-08-25T00:00:06Z" : null,
     stream_url: created.stream_url,
+    frame_results_url: created.frame_results_url,
     result_url: status === "completed" ? created.result_url : null,
     download_url: status === "completed" ? "/api/v1/jobs/job-1/download" : null,
     report_url: status === "completed" ? "/api/v1/jobs/job-1/report" : null,
@@ -79,11 +94,36 @@ function job(status: VideoJob["status"]): VideoJob {
   };
 }
 
-function jsonResponse(payload: VideoJob): Response {
+function jsonResponse(payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+function mockJobAndFrameRequests(...jobs: VideoJob[]) {
+  let jobIndex = 0;
+  return vi.fn().mockImplementation((input: string) => {
+    const url = String(input);
+    if (url.includes("/frames?")) {
+      const afterFrame = Number(new URL(url).searchParams.get("after_frame") || 0);
+      const items = frameResults.filter((item) => item.frame_number > afterFrame);
+      return Promise.resolve(jsonResponse({
+        job_id: "job-1",
+        job_status: jobs[Math.min(jobIndex, jobs.length - 1)].status,
+        items,
+        next_after_frame: items.at(-1)?.frame_number ?? afterFrame,
+        has_more: false,
+      }));
+    }
+    const response = jobs[Math.min(jobIndex, jobs.length - 1)];
+    jobIndex += 1;
+    return Promise.resolve(jsonResponse(response));
+  });
+}
+
+function jobRequestCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return fetchMock.mock.calls.filter(([input]) => !String(input).includes("/frames?")).length;
 }
 
 async function flushPromises() {
@@ -101,10 +141,7 @@ describe("VideoProcessingView", () => {
   });
 
   it("shows processing progress and transitions to completed playback", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse(job("processing")))
-      .mockResolvedValueOnce(jsonResponse(job("completed")));
+    const fetchMock = mockJobAndFrameRequests(job("processing"), job("completed"));
     vi.stubGlobal("fetch", fetchMock);
     render(<VideoProcessingView created={created} />);
 
@@ -130,13 +167,19 @@ describe("VideoProcessingView", () => {
     expect(screen.getByText("Saved WARNING / DANGER clips")).toBeInTheDocument();
     expect(screen.getByText("8 DANGER frames")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "View frame evidence" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Risk timeline" })).toBeInTheDocument();
+    expect(screen.getByText("6 / 100 frames mapped")).toBeInTheDocument();
+
+    const player = document.querySelector("video");
+    fireEvent.click(screen.getByRole("button", { name: /DANGER: frames 5 to 5/i }));
+    expect(player?.currentTime).toBe(0.4);
 
     await act(async () => vi.advanceTimersByTimeAsync(3000));
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(jobRequestCount(fetchMock)).toBe(2);
   });
 
   it("opens original, annotated, and Pseudo-BEV evidence", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(job("completed")));
+    const fetchMock = mockJobAndFrameRequests(job("completed"));
     vi.stubGlobal("fetch", fetchMock);
     render(<VideoProcessingView created={created} />);
 
@@ -164,14 +207,14 @@ describe("VideoProcessingView", () => {
   });
 
   it("renders failed jobs and stops polling", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(job("failed")));
+    const fetchMock = mockJobAndFrameRequests(job("failed"));
     vi.stubGlobal("fetch", fetchMock);
     render(<VideoProcessingView created={created} />);
 
     await flushPromises();
     expect(screen.getByText("fixture failure")).toBeInTheDocument();
     await act(async () => vi.advanceTimersByTimeAsync(2000));
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(jobRequestCount(fetchMock)).toBe(1);
   });
 
   it("shows a clear warning for an mp4v fallback result", async () => {
@@ -179,7 +222,7 @@ describe("VideoProcessingView", () => {
     fallback.output_codec = "mp4v";
     fallback.browser_playback_compatible = false;
     fallback.playback_warning = "FFmpeg is unavailable; browser playback may fail";
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(fallback));
+    const fetchMock = mockJobAndFrameRequests(fallback);
     vi.stubGlobal("fetch", fetchMock);
     render(<VideoProcessingView created={created} />);
 
@@ -189,7 +232,7 @@ describe("VideoProcessingView", () => {
   });
 
   it("cleans up its polling timer when unmounted", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(job("processing")));
+    const fetchMock = mockJobAndFrameRequests(job("processing"));
     vi.stubGlobal("fetch", fetchMock);
     const view = render(<VideoProcessingView created={created} />);
     await flushPromises();
@@ -197,6 +240,6 @@ describe("VideoProcessingView", () => {
 
     view.unmount();
     await act(async () => vi.advanceTimersByTimeAsync(2000));
-    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(jobRequestCount(fetchMock)).toBe(1);
   });
 });
