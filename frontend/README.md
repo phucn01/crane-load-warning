@@ -11,9 +11,12 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. The interface supports click selection and drag
-and drop for JPG/JPEG/PNG images, local preview, explicit analysis, assessment
-quality details, and RGB/Pseudo-BEV/combined evidence.
+Open `http://localhost:5173`. One smart uploader accepts images and videos,
+detects the media from file headers/MIME/extension, and shows a media-specific
+confirmation action before routing it to the existing image or video API.
+Image results retain local preview,
+assessment quality details, and RGB/Pseudo-BEV/combined evidence; video results
+retain live processing preview, progress, full output, and risk clips.
 
 ## Environment
 
@@ -35,4 +38,28 @@ npm run build
 ```
 
 The generated `dist/` directory is ignored by Git.
+
+## Video processing
+
+After a video upload the page polls the in-memory job every
+750 ms, shows the latest annotated MJPEG processing preview, stops polling at
+`completed` or `failed`, and uses HTML5 `<video controls>` for the result.
+Preview frames are not playback at source FPS, and SAFE/WARNING/DANGER counts
+describe independently assessed frames rather than safety events.
+Completed results also list directly written WARNING/DANGER clips with 2-second
+pre-roll and post-roll context by default. Each clip can open a popup containing
+the annotated frame and Pseudo-BEV for up to three representative risk frames
+(first, highest-risk, and last). These clips and images are frame-level risk
+evidence, not tracked safety events.
+The backend normally finalizes generated files as H.264/yuv420p/faststart for
+HTML5 playback. When it must fall back to `mp4v`, the result view displays a
+codec compatibility warning.
+
+Run frontend tests with:
+
+```bash
+npm test
+```
+
+> Current video processing evaluates detections independently per frame. Cross-frame person/load identity is intentionally not tracked.
 

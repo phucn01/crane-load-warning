@@ -84,6 +84,18 @@ Swagger UI is available at `http://127.0.0.1:8000/docs`. The v1 endpoints are:
 - `GET /api/v1/health`
 - `POST /api/v1/detection/image` with multipart field `file` (`jpg`, `jpeg`, or
   `png`)
+- `POST /api/v1/detection/video` with multipart field `file` (`mp4`, `mov`,
+  `avi`, `mkv`, or `webm`); returns an in-memory job after upload
+- `GET /api/v1/jobs/{job_id}` for progress and frame-risk statistics
+- `GET /api/v1/jobs/{job_id}/stream` for the latest annotated processing frame
+  as `multipart/x-mixed-replace` MJPEG
+- `GET /api/v1/jobs/{job_id}/result` for the completed annotated MP4
+- `GET /api/v1/jobs/{job_id}/segments/{segment_id}` for a finalized padded
+  WARNING/DANGER frame segment
+- `GET /api/v1/jobs/{job_id}/segments/{segment_id}/evidence/{frame_number}/rgb`
+  for a representative annotated frame PNG
+- `GET /api/v1/jobs/{job_id}/segments/{segment_id}/evidence/{frame_number}/bev`
+  for that frame's Pseudo-BEV PNG
 
 Example:
 
@@ -104,6 +116,12 @@ Optional environment settings:
 - `CRANE_RISK_CONFIG`
 - `CRANE_EVIDENCE_ROOT`
 - `CRANE_MAX_UPLOAD_BYTES`
+- `CRANE_VIDEO_UPLOAD_ROOT`
+- `CRANE_VIDEO_OUTPUT_ROOT`
+- `CRANE_MAX_VIDEO_UPLOAD_BYTES`
+- `CRANE_RISK_SEGMENT_PRE_ROLL_SECONDS` (default `2.0`)
+- `CRANE_RISK_SEGMENT_POST_ROLL_SECONDS` (default `2.0`)
+- `CRANE_FFMPEG_PATH` (optional explicit FFmpeg executable)
 - `CRANE_PRELOAD_MODELS`
 - `CRANE_CORS_ORIGINS` (comma-separated exact origins; no wildcard)
 - `CRANE_LOG_LEVEL`
@@ -111,3 +129,51 @@ Optional environment settings:
 Frame-local `person_id` and `load_id` values in a response are explanatory
 labels only. Tracking and stable cross-frame IDs are intentionally not part of
 this image API.
+
+## Video processing architecture
+
+Uploaded videos use UUID filenames under `storage/uploads/videos`. The HTTP
+handler creates an in-memory `queued` job and submits blocking OpenCV and
+inference work to a single-worker `ThreadPoolExecutor`, keeping the FastAPI
+event loop available. The worker reads each frame once and reuses the image
+service's Vision -> Geometry -> Risk -> Annotation frame pipeline. The same
+annotated frame is JPEG-encoded into the one latest-preview slot and written in
+order to the output video; individual frame JPEGs are never stored.
+
+Job states are `queued`, `processing`, `completed`, and `failed`. Counts are
+frame statistics (`safe_frame_count`, `warning_frame_count`, and
+`danger_frame_count`), not event counts. Runtime event association is deferred
+until tracking is introduced. The MJPEG endpoint is a processing preview, not
+source-FPS playback.
+
+WARNING/DANGER clips are written directly during processing. A compressed
+in-memory ring buffer supplies the configured pre-roll; the active segment
+writer stays open through the configured SAFE post-roll. A later DANGER frame
+upgrades the segment's maximum level, while counts retain the exact number of
+WARNING and DANGER classifications. Up to three representative non-safe frames
+are retained per segment: the first risk frame, the first frame at the segment's
+highest risk level, and the final risk frame. Duplicate selections collapse to
+one item. Each selection stores an annotated RGB PNG and Pseudo-BEV PNG produced
+during the original frame inference. These are contiguous frame-level risk
+segments, not tracked safety events.
+
+Risk clips are stored as UUID-named MP4 files in a sibling directory beside
+the full output video:
+
+```text
+storage/outputs/videos/
+├── <output-uuid>.mp4
+└── <output-uuid>_segments/
+    └── <segment-uuid>.mp4
+```
+
+Output preserves source width, height, ordering, and a valid source FPS (or a
+25 FPS fallback). OpenCV first writes MP4 with `mp4v` and always releases both
+capture and writer. After inference, FFmpeg finalizes the full output and every
+risk clip as H.264 (`libx264`), `yuv420p`, `avc1`, with `faststart` for browser
+playback. The project dependency `imageio-ffmpeg` supplies a platform binary;
+`CRANE_FFMPEG_PATH` can override it. If FFmpeg is unavailable or conversion
+fails, the original `mp4v` remains available and the API/frontend expose an
+explicit playback compatibility warning.
+
+> Current video processing evaluates detections independently per frame. Cross-frame person/load identity is intentionally not tracked.
