@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from threading import Lock
 from time import perf_counter
@@ -38,17 +39,40 @@ from risk_engine import (
     RiskEvaluator,
     RiskFramePipeline,
     RiskFrameResult,
+    RiskLevel,
     RiskPairInput,
     ZoneGeometry,
     load_risk_policy,
 )
-from vision_engine import Detection, VisionFramePipeline, build_model_manager
+from vision_engine import (
+    Detection,
+    VisionFramePipeline,
+    VisionFrameResult,
+    build_model_manager,
+)
 from vision_engine.model_manager import ModelManager
 
 from app.core.config import Settings
 from app.schemas.detection import ImageDetectionResponse
 
 PIPELINE_VERSION = "vision-geometry-risk-annotation-v1"
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessedFrame:
+    """One independently assessed frame and its public evidence views."""
+
+    annotated_bgr: NDArray[np.uint8]
+    pseudo_bev_bgr: NDArray[np.uint8] | None
+    risk_level: RiskLevel
+
+
+@dataclass(frozen=True, slots=True)
+class _FramePipelineResult:
+    vision: VisionFrameResult
+    geometry: GeometryFrameResult
+    risk: RiskFrameResult
+    annotated_bgr: NDArray[np.uint8]
 
 
 class ImageProcessingService:
@@ -136,15 +160,11 @@ class ImageProcessingService:
         # The adapters contain their own safeguards, while this lock also prevents
         # concurrent access to model backends that do not guarantee thread safety.
         with self._processing_lock:
-            vision = self.vision_pipeline.process(image_bgr, frame_id=run_id)
-            geometry = self.geometry_pipeline.process(
-                vision.detections,
-                vision.relative_depth.depth_map,
-                frame_id=run_id,
-            )
-            risk = self.risk_pipeline.process(
-                _geometry_to_risk_inputs(geometry),
+            frame = self._run_frame_pipeline(
+                image_bgr,
                 context=context,
+                update_temporal_event=True,
+                frame_local_labels=False,
             )
             traceability = EvidenceTraceability(
                 pipeline_version=PIPELINE_VERSION,
@@ -154,33 +174,34 @@ class ImageProcessingService:
             evidence = self._write_annotations(
                 run_dir=run_dir,
                 image_bgr=image_bgr,
-                detections=vision.detections,
-                geometry=geometry,
-                risk_result=risk,
+                annotated_bgr=frame.annotated_bgr,
+                detections=frame.vision.detections,
+                geometry=frame.geometry,
+                risk_result=frame.risk,
                 context=context,
                 traceability=traceability,
             )
 
-        counts = Counter(item["class_name"] for item in vision.detections)
+        counts = Counter(item["class_name"] for item in frame.vision.detections)
         models = self.model_manager.metadata().get("models", {})
         payload = {
             "status": "completed",
             "processing_time_ms": round((perf_counter() - started) * 1000.0, 3),
-            "assessment": _assessment_payload(risk.assessment),
+            "assessment": _assessment_payload(frame.risk.assessment),
             "summary": {
                 "person_count": counts.get("person", 0),
                 "load_count": counts.get("hanging_object", 0),
                 "rope_count": counts.get("hanging_rope", 0) + counts.get("rope", 0),
             },
-            "detections": _detection_payloads(vision.detections),
-            "geometry": _geometry_payload(geometry),
+            "detections": _detection_payloads(frame.vision.detections),
+            "geometry": _geometry_payload(frame.geometry),
             "evidence": evidence,
             "metadata": {
                 "pipeline_version": PIPELINE_VERSION,
                 "frame_id": run_id,
                 "image_width": int(image_bgr.shape[1]),
                 "image_height": int(image_bgr.shape[0]),
-                "depth": vision.relative_depth.metadata.to_dict(),
+                "depth": frame.vision.relative_depth.metadata.to_dict(),
                 "models_loaded": {
                     str(name): bool(values.get("loaded", False))
                     for name, values in models.items()
@@ -191,11 +212,85 @@ class ImageProcessingService:
         }
         return ImageDetectionResponse.model_validate(payload)
 
+    def process_video_frame(
+        self,
+        image_bgr: NDArray[np.uint8],
+        *,
+        upload_id: str,
+        frame_index: int,
+        timestamp: float,
+    ) -> ProcessedFrame:
+        """Run the existing frame pipeline once without cross-frame association."""
+
+        frame_id = f"{upload_id}:frame:{frame_index}"
+        context = MediaFrameContext(
+            upload_id=upload_id,
+            frame_id=frame_id,
+            frame_index=frame_index,
+            timestamp=timestamp,
+            media_type=MediaType.VIDEO,
+        )
+        with self._processing_lock:
+            frame = self._run_frame_pipeline(
+                image_bgr,
+                context=context,
+                update_temporal_event=False,
+                frame_local_labels=True,
+            )
+            pseudo_bev = (
+                None
+                if frame.risk.assessment.level is RiskLevel.SAFE
+                else self.annotation_composer.render_pseudo_bev(
+                    frame.geometry,
+                    frame.risk.assessment,
+                )
+            )
+        return ProcessedFrame(
+            annotated_bgr=frame.annotated_bgr,
+            pseudo_bev_bgr=pseudo_bev,
+            risk_level=frame.risk.assessment.level,
+        )
+
+    def _run_frame_pipeline(
+        self,
+        image_bgr: NDArray[np.uint8],
+        *,
+        context: MediaFrameContext,
+        update_temporal_event: bool,
+        frame_local_labels: bool,
+    ) -> _FramePipelineResult:
+        """Single shared Vision -> Geometry -> Risk -> Annotation path."""
+
+        vision = self.vision_pipeline.process(image_bgr, frame_id=context.frame_id)
+        geometry = self.geometry_pipeline.process(
+            vision.detections,
+            vision.relative_depth.depth_map,
+            frame_id=context.frame_id,
+        )
+        risk = self.risk_pipeline.process(
+            _geometry_to_risk_inputs(geometry),
+            context=context,
+            update_temporal_event=update_temporal_event,
+        )
+        annotated = render_image_overlay(
+            image_bgr,
+            vision.detections,
+            risk.assessment,
+            frame_local_labels=frame_local_labels,
+        )
+        return _FramePipelineResult(
+            vision=vision,
+            geometry=geometry,
+            risk=risk,
+            annotated_bgr=annotated,
+        )
+
     def _write_annotations(
         self,
         *,
         run_dir: Path,
         image_bgr: NDArray[np.uint8],
+        annotated_bgr: NDArray[np.uint8],
         detections: tuple[Detection, ...],
         geometry: GeometryFrameResult,
         risk_result: RiskFrameResult,
@@ -205,10 +300,7 @@ class ImageProcessingService:
         run_dir.mkdir(parents=True, exist_ok=False)
         rgb_path = run_dir / "rgb.png"
         pseudo_bev_path = run_dir / "pseudo_bev.png"
-        _write_png(
-            rgb_path,
-            render_image_overlay(image_bgr, detections, risk_result.assessment),
-        )
+        _write_png(rgb_path, annotated_bgr)
         _write_png(
             pseudo_bev_path,
             self.annotation_composer.render_pseudo_bev(
@@ -229,11 +321,7 @@ class ImageProcessingService:
         return {
             "rgb_url": f"{prefix}/{rgb_path.name}",
             "pseudo_bev_url": f"{prefix}/{pseudo_bev_path.name}",
-            "combined_url": (
-                None
-                if combined is None
-                else f"{prefix}/{combined.evidence_image_path.name}"
-            ),
+            "combined_url": f"{prefix}/{combined.evidence_image_path.name}",
         }
 
 
@@ -430,4 +518,4 @@ def _model_versions(metadata: Mapping[str, Any]) -> dict[str, str]:
     }
 
 
-__all__ = ["PIPELINE_VERSION", "ImageProcessingService"]
+__all__ = ["PIPELINE_VERSION", "ImageProcessingService", "ProcessedFrame"]

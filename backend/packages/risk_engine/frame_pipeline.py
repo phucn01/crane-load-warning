@@ -91,6 +91,7 @@ class RiskFramePipeline:
         pair_inputs: Iterable[RiskPairInput],
         *,
         context: MediaFrameContext,
+        update_temporal_event: bool = True,
     ) -> RiskFrameResult:
         """Process an image or video frame through the same frame-level API."""
 
@@ -100,14 +101,23 @@ class RiskFramePipeline:
                 "process",
                 frame_id=context.frame_id,
             ):
-                return self._process(pair_inputs, context=context)
-        return self._process(pair_inputs, context=context)
+                return self._process(
+                    pair_inputs,
+                    context=context,
+                    update_temporal_event=update_temporal_event,
+                )
+        return self._process(
+            pair_inputs,
+            context=context,
+            update_temporal_event=update_temporal_event,
+        )
 
     def _process(
         self,
         pair_inputs: Iterable[RiskPairInput],
         *,
         context: MediaFrameContext,
+        update_temporal_event: bool,
     ) -> RiskFrameResult:
         assessments = tuple(
             self.evaluator.evaluate(
@@ -124,7 +134,9 @@ class RiskFramePipeline:
         )
 
         event = None
-        if context.has_temporal_event:
+        # Runtime event association is deferred until tracking is introduced.
+        # Callers processing independent video frames explicitly disable it.
+        if context.has_temporal_event and update_temporal_event:
             event = self.state_machine.update(
                 RiskSignal(
                     level=frame_assessment.level,

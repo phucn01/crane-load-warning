@@ -29,6 +29,8 @@ def render_image_overlay(
     image_bgr: NDArray[np.generic],
     detections: Iterable[Detection],
     assessment: FrameRiskAssessment,
+    *,
+    frame_local_labels: bool = False,
 ) -> NDArray[np.uint8]:
     """Render segmentation when available, otherwise bbox, without physical zones."""
 
@@ -40,10 +42,15 @@ def render_image_overlay(
         class_name = detection["class_name"]
         counters[class_name] += 1
         entity_id = f"{class_name}_{counters[class_name]:02d}"
+        display_label = (
+            f"{class_name} {counters[class_name]}"
+            if frame_local_labels
+            else entity_id
+        )
         level = None
         if class_name == "person":
             level = person_levels.get(entity_id, assessment.level)
-        _draw_detection(output, detection, entity_id=entity_id, level=level)
+        _draw_detection(output, detection, entity_id=display_label, level=level)
 
     _draw_frame_banner(output, assessment)
     return output

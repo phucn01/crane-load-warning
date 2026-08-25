@@ -1,4 +1,4 @@
-"""Compose and persist offline evidence for non-safe frame assessments."""
+"""Compose and persist offline evidence for frame assessments."""
 
 from __future__ import annotations
 
@@ -18,7 +18,6 @@ from risk_engine import (
     FrameRiskAssessment,
     MediaFrameContext,
     RiskFrameResult,
-    RiskLevel,
     SafetyAssessment,
 )
 from vision_engine.contracts import Detection
@@ -29,7 +28,7 @@ from .pseudo_bev_overlay import render_pseudo_bev_chart
 
 
 class OfflineEvidenceComposer:
-    """Create paired image and JSON evidence for WARNING/DANGER frames."""
+    """Create paired image and JSON evidence for assessed frames."""
 
     def __init__(
         self,
@@ -134,8 +133,8 @@ class OfflineEvidenceComposer:
         traceability: EvidenceTraceability,
         output_dir: str | Path,
         overwrite: bool = False,
-    ) -> EvidenceArtifacts | None:
-        """Write image and JSON only when the immediate frame is non-safe."""
+    ) -> EvidenceArtifacts:
+        """Write the combined image and traceable JSON assessment."""
 
         if self.timeline is not None:
             with self.timeline.track(
@@ -175,10 +174,8 @@ class OfflineEvidenceComposer:
         traceability: EvidenceTraceability,
         output_dir: str | Path,
         overwrite: bool,
-    ) -> EvidenceArtifacts | None:
+    ) -> EvidenceArtifacts:
 
-        if risk_result.assessment.level is RiskLevel.SAFE:
-            return None
         _validate_frame_identity(geometry, risk_result.assessment, context)
         composed = self.compose(
             image_bgr=image_bgr,

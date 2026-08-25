@@ -31,8 +31,8 @@ pseudo_bev:
 zones:
   # Danger ratios expand the footprint; warning ratios then expand danger.
   danger:
-    lateral_ratio: 0.15
+    lateral_ratio: 0.20
     longitudinal_ratio: 0.20
   warning:
-    lateral_ratio: 0.30
+    lateral_ratio: 0.40
     longitudinal_ratio: 0.40

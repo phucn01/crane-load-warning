@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +17,12 @@ class Settings:
     risk_config: Path
     evidence_root: Path
     max_upload_bytes: int = 20 * 1024 * 1024
+    video_upload_root: Path | None = None
+    video_output_root: Path | None = None
+    max_video_upload_bytes: int = 500 * 1024 * 1024
+    risk_segment_pre_roll_seconds: float = 2.0
+    risk_segment_post_roll_seconds: float = 2.0
+    ffmpeg_path: Path | None = None
     preload_models: bool = False
     cors_origins: tuple[str, ...] = (
         "http://localhost:5173",
@@ -41,6 +48,27 @@ class Settings:
                 "CRANE_EVIDENCE_ROOT",
                 PROJECT_ROOT / "backend" / "storage" / "evidence",
             ),
+            video_upload_root=_environment_path(
+                "CRANE_VIDEO_UPLOAD_ROOT",
+                PROJECT_ROOT / "backend" / "storage" / "uploads" / "videos",
+            ),
+            video_output_root=_environment_path(
+                "CRANE_VIDEO_OUTPUT_ROOT",
+                PROJECT_ROOT / "backend" / "storage" / "outputs" / "videos",
+            ),
+            max_video_upload_bytes=_positive_int_environment(
+                "CRANE_MAX_VIDEO_UPLOAD_BYTES",
+                500 * 1024 * 1024,
+            ),
+            risk_segment_pre_roll_seconds=_non_negative_float_environment(
+                "CRANE_RISK_SEGMENT_PRE_ROLL_SECONDS",
+                2.0,
+            ),
+            risk_segment_post_roll_seconds=_non_negative_float_environment(
+                "CRANE_RISK_SEGMENT_POST_ROLL_SECONDS",
+                2.0,
+            ),
+            ffmpeg_path=_optional_environment_path("CRANE_FFMPEG_PATH"),
             max_upload_bytes=_positive_int_environment(
                 "CRANE_MAX_UPLOAD_BYTES",
                 20 * 1024 * 1024,
@@ -56,6 +84,11 @@ class Settings:
 def _environment_path(name: str, default: Path) -> Path:
     value = os.getenv(name)
     return Path(value).expanduser().resolve() if value else default.resolve()
+
+
+def _optional_environment_path(name: str) -> Path | None:
+    value = os.getenv(name)
+    return Path(value).expanduser().resolve() if value else None
 
 
 def _positive_int_environment(name: str, default: int) -> int:
@@ -76,6 +109,14 @@ def _boolean_environment(name: str, default: bool) -> bool:
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise ValueError(f"{name} must be a boolean value")
+
+
+def _non_negative_float_environment(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    value = default if raw is None else float(raw)
+    if not math.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be non-negative")
+    return value
 
 
 def _origins_environment(name: str, default: tuple[str, ...]) -> tuple[str, ...]:

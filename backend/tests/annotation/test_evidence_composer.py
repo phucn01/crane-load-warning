@@ -18,8 +18,11 @@ TRACEABILITY = EvidenceTraceability(
 )
 
 
-@pytest.mark.parametrize("level", [RiskLevel.WARNING, RiskLevel.DANGER])
-def test_writes_image_and_traceable_json_for_non_safe_assessment(
+@pytest.mark.parametrize(
+    "level",
+    [RiskLevel.SAFE, RiskLevel.WARNING, RiskLevel.DANGER],
+)
+def test_writes_image_and_traceable_json_for_every_assessment(
     tmp_path: Path,
     annotation_bundle: AnnotationBundle,
     level: RiskLevel,
@@ -35,7 +38,6 @@ def test_writes_image_and_traceable_json_for_non_safe_assessment(
         output_dir=tmp_path,
     )
 
-    assert artifacts is not None
     assert artifacts.evidence_image_path.is_file()
     assert artifacts.assessment_json_path.is_file()
     evidence = cv2.imread(str(artifacts.evidence_image_path), cv2.IMREAD_COLOR)
@@ -54,25 +56,6 @@ def test_writes_image_and_traceable_json_for_non_safe_assessment(
     assert payload["artifacts"]["evidence_image"] == (
         artifacts.evidence_image_path.name
     )
-
-
-def test_safe_assessment_does_not_create_evidence(
-    tmp_path: Path,
-    annotation_bundle: AnnotationBundle,
-):
-    artifacts = OfflineEvidenceComposer().write(
-        image_bgr=annotation_bundle.image_bgr,
-        detections=annotation_bundle.detections,
-        geometry=annotation_bundle.geometry,
-        risk_result=_with_level(annotation_bundle.risk_result, RiskLevel.SAFE),
-        context=annotation_bundle.context,
-        traceability=TRACEABILITY,
-        output_dir=tmp_path / "safe",
-    )
-
-    assert artifacts is None
-    assert not (tmp_path / "safe").exists()
-
 
 def test_default_pseudo_bev_uses_wide_chart_size(
     annotation_bundle: AnnotationBundle,
