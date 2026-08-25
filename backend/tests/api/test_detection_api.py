@@ -15,6 +15,10 @@ class FakeImageProcessingService:
     def __init__(self, *, failure: Exception | None = None) -> None:
         self.failure = failure
         self.calls = 0
+        self.preload_calls = 0
+
+    def preload_models(self) -> None:
+        self.preload_calls += 1
 
     def readiness(self) -> dict[str, object]:
         return {
@@ -99,7 +103,8 @@ def _png_bytes() -> bytes:
 
 
 def test_health_reports_process_and_pipeline_readiness(tmp_path: Path) -> None:
-    with _client(tmp_path, FakeImageProcessingService()) as client:
+    service = FakeImageProcessingService()
+    with _client(tmp_path, service) as client:
         response = client.get("/api/v1/health")
 
     assert response.status_code == 200
@@ -109,6 +114,7 @@ def test_health_reports_process_and_pipeline_readiness(tmp_path: Path) -> None:
         "pipeline_version": "test-pipeline",
         "models_loaded": {"fake": True},
     }
+    assert service.preload_calls == 1
 
 
 def test_empty_image_is_rejected_before_pipeline(tmp_path: Path) -> None:

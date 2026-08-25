@@ -43,3 +43,7 @@ npm run dev
 Open `http://localhost:5173` to select or drop a JPG/PNG image, preview it
 locally, run the safety assessment, and review the risk result and evidence.
 Set `VITE_API_BASE_URL` when the API is hosted at a different origin.
+The backend preloads RF-DETR, YOLO, and Depth Anything before it becomes ready,
+so the first assessment from the frontend does not reload model weights. Set
+`CRANE_PRELOAD_MODELS=false` before starting the backend only when lazy loading
+is preferred.

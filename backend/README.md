@@ -105,9 +105,11 @@ curl.exe -X POST "http://127.0.0.1:8000/api/v1/detection/image" `
 ```
 
 Generated annotation images are served below `/evidence/...`; internal paths
-and depth/mask artifacts are not exposed by the API. Models are lazy-loaded on
-the first analysis and reused for later requests. Set
-`CRANE_PRELOAD_MODELS=true` to load them once during application startup.
+and depth/mask artifacts are not exposed by the API. RF-DETR, YOLO, and Depth
+Anything are loaded once during backend startup and the same instances are
+reused for all later image/video requests. The API only starts accepting
+requests after preload finishes. Set `CRANE_PRELOAD_MODELS=false` to opt back
+into lazy loading for lightweight development or tests.
 
 Optional environment settings:
 
@@ -122,7 +124,7 @@ Optional environment settings:
 - `CRANE_RISK_SEGMENT_PRE_ROLL_SECONDS` (default `2.0`)
 - `CRANE_RISK_SEGMENT_POST_ROLL_SECONDS` (default `2.0`)
 - `CRANE_FFMPEG_PATH` (optional explicit FFmpeg executable)
-- `CRANE_PRELOAD_MODELS`
+- `CRANE_PRELOAD_MODELS` (default `true`; set `false` for lazy loading)
 - `CRANE_CORS_ORIGINS` (comma-separated exact origins; no wildcard)
 - `CRANE_LOG_LEVEL`
 - `CRANE_LOG_FILE` (default `backend/logs/backend.log`)

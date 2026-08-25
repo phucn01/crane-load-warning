@@ -23,7 +23,10 @@ class Settings:
     risk_segment_pre_roll_seconds: float = 2.0
     risk_segment_post_roll_seconds: float = 2.0
     ffmpeg_path: Path | None = None
-    preload_models: bool = False
+    # Load the shared model instances during the ASGI lifespan by default so the
+    # first frontend request only performs inference. This can still be disabled
+    # for lightweight development/test processes with CRANE_PRELOAD_MODELS=false.
+    preload_models: bool = True
     cors_origins: tuple[str, ...] = (
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -42,7 +45,7 @@ class Settings:
             ),
             risk_config=_environment_path(
                 "CRANE_RISK_CONFIG",
-                PROJECT_ROOT / "configs" / "risk-policy.example.yaml",
+                PROJECT_ROOT / "configs" / "risk-policy.local.yaml",
             ),
             evidence_root=_environment_path(
                 "CRANE_EVIDENCE_ROOT",
@@ -73,7 +76,7 @@ class Settings:
                 "CRANE_MAX_UPLOAD_BYTES",
                 20 * 1024 * 1024,
             ),
-            preload_models=_boolean_environment("CRANE_PRELOAD_MODELS", False),
+            preload_models=_boolean_environment("CRANE_PRELOAD_MODELS", True),
             cors_origins=_origins_environment(
                 "CRANE_CORS_ORIGINS",
                 ("http://localhost:5173", "http://127.0.0.1:5173"),

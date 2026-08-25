@@ -22,6 +22,10 @@ class FakeFrameProcessor:
     def __init__(self, levels: tuple[RiskLevel, ...]) -> None:
         self.levels = levels
         self.calls = 0
+        self.preload_calls = 0
+
+    def preload_models(self) -> None:
+        self.preload_calls += 1
 
     def readiness(self) -> dict[str, object]:
         return {
