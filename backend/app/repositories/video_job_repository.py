@@ -1,4 +1,4 @@
-"""Thread-safe in-memory repository for video jobs and latest previews."""
+"""Thread-safe in-memory repository for image results and video jobs."""
 
 from __future__ import annotations
 
@@ -122,3 +122,6 @@ class VideoJobRepository:
             job = self._jobs.pop(job_id, None)
             self._condition.notify_all()
             return job
+
+    def close(self) -> None:
+        """Release repository resources; the in-memory repository owns none."""

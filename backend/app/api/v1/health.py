@@ -12,7 +12,11 @@ router = APIRouter(tags=["health"])
 @router.get("/health")
 def health(request: Request) -> dict[str, Any]:
     service = request.app.state.image_processing_service
-    return {"status": "ok", **service.readiness()}
+    return {
+        "status": "ok",
+        "persistence_backend": request.app.state.persistence_backend,
+        **service.readiness(),
+    }
 
 
 __all__ = ["router"]

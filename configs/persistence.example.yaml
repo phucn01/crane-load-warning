@@ -1,0 +1,4 @@
+persistence:
+  # Save WARNING/DANGER evidence at most once per interval. A WARNING -> DANGER
+  # escalation is captured immediately even when it occurs during the cooldown.
+  snapshot_min_interval_seconds: 2.0

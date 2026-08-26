@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 from uuid import uuid4
@@ -12,8 +13,13 @@ import numpy as np
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
-from app.api.dependencies import VideoJobRepositoryDep, VideoWorkerDep
+from app.api.dependencies import (
+    ProcessingHistoryServiceDep,
+    VideoJobRepositoryDep,
+    VideoWorkerDep,
+)
 from app.core.logging import log_operation
+from app.models import JobStatus, ProcessingJobRecord
 from app.schemas.detection import ImageDetectionResponse
 from app.schemas.video_job import VideoJobCreatedResponse
 
@@ -36,7 +42,9 @@ SUPPORTED_VIDEO_CONTENT_TYPES = {
 async def detect_image(
     request: Request,
     file: Annotated[UploadFile, File()],
+    history: ProcessingHistoryServiceDep,
 ) -> ImageDetectionResponse:
+    analysis_id: str | None = None
     try:
         with log_operation(LOGGER, "validate_image_upload"):
             _validate_upload_type(file)
@@ -59,10 +67,43 @@ async def detect_image(
         ):
             image_bgr = _decode_supported_image(payload)
         service = request.app.state.image_processing_service
+        analysis_id = uuid4().hex
+        created_at = datetime.now(UTC)
+        history.create_job(
+            ProcessingJobRecord(
+                job_id=analysis_id,
+                media_type="image",
+                input_name=Path(file.filename or "image").name,
+                input_path=None,
+                output_path=None,
+                status=JobStatus.QUEUED,
+                total_frames=None,
+                processed_frames=None,
+                safe_frame_count=0,
+                warning_frame_count=0,
+                danger_frame_count=0,
+                max_risk_level=None,
+                processing_time_ms=None,
+                average_processing_fps=None,
+                error_message=None,
+                created_at=created_at,
+                started_at=None,
+                completed_at=None,
+            )
+        )
+        history.mark_processing(analysis_id)
         try:
             with log_operation(LOGGER, "process_image_request"):
-                return await run_in_threadpool(service.process, image_bgr)
+                response = await run_in_threadpool(
+                    service.process,
+                    image_bgr,
+                    run_id=analysis_id,
+                )
+            history.complete_image(analysis_id, response)
+            history.persist_image_snapshot(analysis_id, response)
+            return response
         except Exception as error:
+            history.fail_job(analysis_id, "image processing failed")
             LOGGER.exception(
                 "=== ERROR | OPERATION=IMAGE_PIPELINE | ERROR_TYPE=%s ===",
                 type(error).__name__,
@@ -85,6 +126,7 @@ async def detect_video(
     file: Annotated[UploadFile, File()],
     repository: VideoJobRepositoryDep,
     worker: VideoWorkerDep,
+    history: ProcessingHistoryServiceDep,
 ) -> VideoJobCreatedResponse:
     destination: Path | None = None
     job = None
@@ -107,6 +149,28 @@ async def detect_video(
         output_path = output_root / f"{uuid4().hex}.mp4"
         with log_operation(LOGGER, "create_and_submit_video_job"):
             job = repository.create(input_path=destination, output_path=output_path)
+            history.create_job(
+                ProcessingJobRecord(
+                    job_id=job.job_id,
+                    media_type="video",
+                    input_name=Path(file.filename or "video").name,
+                    input_path=destination,
+                    output_path=output_path,
+                    status=JobStatus.QUEUED,
+                    total_frames=None,
+                    processed_frames=0,
+                    safe_frame_count=0,
+                    warning_frame_count=0,
+                    danger_frame_count=0,
+                    max_risk_level=None,
+                    processing_time_ms=None,
+                    average_processing_fps=None,
+                    error_message=None,
+                    created_at=job.created_at,
+                    started_at=None,
+                    completed_at=None,
+                )
+            )
             worker.submit(job.job_id)
         LOGGER.info("=== EVENT | VIDEO_JOB_SUBMITTED | JOB_ID=%s ===", job.job_id)
         prefix = f"/api/v1/jobs/{job.job_id}"
@@ -126,6 +190,7 @@ async def detect_video(
             destination.unlink(missing_ok=True)
         if job is not None:
             repository.remove(job.job_id)
+            history.fail_job(job.job_id, "video upload failed")
         LOGGER.exception(
             "=== ERROR | OPERATION=VIDEO_UPLOAD | ERROR_TYPE=%s ===",
             type(error).__name__,

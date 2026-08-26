@@ -9,21 +9,33 @@ from time import perf_counter
 from typing import Any
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 from starlette.staticfiles import StaticFiles
 
-from app.api.v1 import detection, health, jobs
-from app.core.config import Settings
+from app.api.v1 import detection, health, jobs, risk_snapshots
+from app.core.config import PROJECT_ROOT, Settings
 from app.core.logging import (
     bind_request_id,
     configure_logging,
     log_operation,
     reset_request_id,
 )
-from app.repositories import VideoJobRepository
+from app.infrastructure.db import create_database_session_factory
+from app.repositories import (
+    InMemoryProcessingJobRepository,
+    InMemoryRiskSnapshotRepository,
+    SqlAlchemyProcessingJobRepository,
+    SqlAlchemyRiskSnapshotRepository,
+    VideoJobRepository,
+)
 from app.services.image_processing_service import ImageProcessingService
+from app.services.processing_history_service import (
+    ProcessingHistoryService,
+    RiskSnapshotPolicy,
+)
 from app.services.video_processing_service import VideoProcessingService
 from app.services.video_transcoding_service import BrowserVideoConverter
 from app.workers import VideoWorker
@@ -39,8 +51,11 @@ def create_app(
     video_job_repository: VideoJobRepository | None = None,
     video_worker: Any | None = None,
 ) -> FastAPI:
+    if settings is None:
+        load_dotenv(PROJECT_ROOT / ".env", override=False)
     resolved_settings = settings or Settings.from_environment()
     repository = video_job_repository or VideoJobRepository()
+    history_service = _processing_history_service(resolved_settings)
     upload_root = resolved_settings.video_upload_root or (
         resolved_settings.evidence_root.parent / "uploads" / "videos"
     )
@@ -57,6 +72,7 @@ def create_app(
                 service = ImageProcessingService.from_settings(resolved_settings)
         application.state.image_processing_service = service
         application.state.video_job_repository = repository
+        application.state.processing_history_service = history_service
         application.state.video_upload_root = upload_root
         application.state.video_output_root = output_root
         upload_root.mkdir(parents=True, exist_ok=True)
@@ -74,6 +90,8 @@ def create_app(
                 video_converter=BrowserVideoConverter.discover(
                     resolved_settings.ffmpeg_path
                 ),
+                history_service=history_service,
+                snapshot_evidence_root=resolved_settings.evidence_root,
             )
         )
         application.state.video_worker = worker
@@ -86,6 +104,10 @@ def create_app(
         finally:
             with log_operation(LOGGER, "shutdown_video_worker"):
                 await run_in_threadpool(worker.close)
+            with log_operation(LOGGER, "close_video_job_repository"):
+                await run_in_threadpool(repository.close)
+            with log_operation(LOGGER, "close_processing_history"):
+                await run_in_threadpool(history_service.close)
             LOGGER.info("=== APPLICATION STOPPED ===")
 
     configure_logging()
@@ -96,6 +118,9 @@ def create_app(
         lifespan=lifespan,
     )
     application.state.settings = resolved_settings
+    application.state.persistence_backend = (
+        "postgresql" if resolved_settings.database_url else "memory"
+    )
 
     @application.middleware("http")
     async def log_http_request(request: Any, call_next: Any) -> Any:
@@ -146,12 +171,34 @@ def create_app(
     application.include_router(health.router, prefix="/api/v1")
     application.include_router(detection.router, prefix="/api/v1")
     application.include_router(jobs.router, prefix="/api/v1")
+    application.include_router(risk_snapshots.router, prefix="/api/v1")
     application.mount(
         "/evidence",
         StaticFiles(directory=resolved_settings.evidence_root, check_dir=False),
         name="evidence",
     )
     return application
+
+
+def _processing_history_service(settings: Settings) -> ProcessingHistoryService:
+    snapshot_policy = RiskSnapshotPolicy.from_yaml(settings.persistence_config)
+    close_callback = None
+    if settings.database_url is None:
+        jobs = InMemoryProcessingJobRepository()
+        snapshots = InMemoryRiskSnapshotRepository(jobs)
+    else:
+        sessions = create_database_session_factory(settings.database_url)
+        jobs = SqlAlchemyProcessingJobRepository(sessions)
+        snapshots = SqlAlchemyRiskSnapshotRepository(sessions)
+        engine = sessions.kw["bind"]
+        close_callback = engine.dispose
+    return ProcessingHistoryService(
+        jobs,
+        snapshots,
+        snapshot_policy=snapshot_policy,
+        job_update_interval_frames=settings.database_job_update_interval,
+        close_callback=close_callback,
+    )
 
 
 app = create_app()

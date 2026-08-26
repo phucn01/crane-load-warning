@@ -68,6 +68,9 @@ class ProcessedFrame:
     annotated_bgr: NDArray[np.uint8]
     pseudo_bev_bgr: NDArray[np.uint8] | None
     risk_level: RiskLevel
+    confidence: float | None = None
+    assessment_reliable: bool = False
+    quality_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,11 +152,16 @@ class ImageProcessingService:
             },
         }
 
-    def process(self, image_bgr: NDArray[np.uint8]) -> ImageDetectionResponse:
+    def process(
+        self,
+        image_bgr: NDArray[np.uint8],
+        *,
+        run_id: str | None = None,
+    ) -> ImageDetectionResponse:
         """Run one decoded BGR image and persist only public annotation images."""
 
         started = perf_counter()
-        run_id = uuid4().hex
+        run_id = run_id or uuid4().hex
         LOGGER.info(
             "=== START | OPERATION=IMAGE_PROCESSING | RUN_ID=%s | WIDTH=%s | "
             "HEIGHT=%s ===",
@@ -273,6 +281,15 @@ class ImageProcessingService:
             annotated_bgr=frame.annotated_bgr,
             pseudo_bev_bgr=pseudo_bev,
             risk_level=frame.risk.assessment.level,
+            confidence=max(
+                (
+                    pair.confidence
+                    for pair in frame.risk.assessment.pair_assessments
+                ),
+                default=None,
+            ),
+            assessment_reliable=frame.risk.assessment.assessment_reliable,
+            quality_reasons=tuple(frame.risk.assessment.quality_reasons),
         )
         LOGGER.info(
             "=== END | OPERATION=VIDEO_FRAME_PROCESSING | JOB_ID=%s | "

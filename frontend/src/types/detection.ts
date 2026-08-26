@@ -124,6 +124,56 @@ export interface ImageDetectionResponse {
   metadata: ProcessingMetadata;
 }
 
+export interface ProcessingJobHistory {
+  id: string;
+  media_type: "image" | "video";
+  input_name: string;
+  input_path: string | null;
+  output_path: string | null;
+  status: VideoJobStatus;
+  total_frames: number | null;
+  processed_frames: number | null;
+  safe_frame_count: number;
+  warning_frame_count: number;
+  danger_frame_count: number;
+  max_risk_level: RiskLevel | null;
+  processing_time_ms: number | null;
+  average_processing_fps: number | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ProcessingJobHistoryPage {
+  items: ProcessingJobHistory[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface RiskSnapshotHistory {
+  id: string;
+  job_id: string;
+  frame_index: number | null;
+  timestamp_sec: number | null;
+  risk_level: "WARNING" | "DANGER";
+  confidence: number | null;
+  assessment_reliable: boolean;
+  quality_reasons: string[];
+  evidence_path: string | null;
+  rgb_evidence_path: string | null;
+  pseudo_bev_path: string | null;
+  created_at: string;
+}
+
+export interface RiskSnapshotHistoryPage {
+  items: RiskSnapshotHistory[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export type VideoJobStatus = "queued" | "processing" | "completed" | "failed";
 
 export interface VideoJobCreated {

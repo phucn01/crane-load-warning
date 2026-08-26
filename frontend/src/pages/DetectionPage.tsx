@@ -120,8 +120,11 @@ export default function DetectionPage() {
             <small>Smart media safety assessment</small>
           </span>
         </a>
-        <div className="system-status">
-          <span aria-hidden="true" /> Local analysis mode
+        <div className="header-actions">
+          <a className="header-link" href="?history=1">History</a>
+          <div className="system-status">
+            <span aria-hidden="true" /> Local analysis mode
+          </div>
         </div>
       </header>
 

@@ -17,10 +17,17 @@ import numpy as np
 from numpy.typing import NDArray
 
 from app.core.logging import log_operation
-from app.models import FrameEvidence, FrameRiskResult, JobStatus, RiskSegment
+from app.models import (
+    FrameEvidence,
+    FrameRiskResult,
+    JobStatus,
+    RiskSegment,
+    RiskSnapshotRecord,
+)
 from app.repositories import VideoJobRepository
 from app.schemas.detection import RiskLevelValue
 from app.services.image_processing_service import ProcessedFrame
+from app.services.processing_history_service import ProcessingHistoryService
 from app.services.video_report_service import write_video_report
 from app.services.video_transcoding_service import (
     BrowserVideoConverter,
@@ -349,6 +356,8 @@ class VideoProcessingService:
         segment_pre_roll_seconds: float = 2.0,
         segment_post_roll_seconds: float = 2.0,
         video_converter: BrowserVideoConverter | None = None,
+        history_service: ProcessingHistoryService | None = None,
+        snapshot_evidence_root: Path | None = None,
     ) -> None:
         if len(output_fourcc) != 4:
             raise ValueError("output_fourcc must contain exactly four characters")
@@ -365,6 +374,8 @@ class VideoProcessingService:
         self.segment_pre_roll_seconds = segment_pre_roll_seconds
         self.segment_post_roll_seconds = segment_post_roll_seconds
         self.video_converter = video_converter or BrowserVideoConverter.discover()
+        self.history_service = history_service
+        self.snapshot_evidence_root = snapshot_evidence_root
 
     def process(self, job_id: str) -> None:
         job = self.repository.get(job_id)
@@ -431,6 +442,11 @@ class VideoProcessingService:
                 total_frames=total_frames,
                 started_at=datetime.now(UTC),
             )
+            if self.history_service is not None:
+                self.history_service.mark_processing(
+                    job_id,
+                    total_frames=total_frames,
+                )
             counts = {"SAFE": 0, "WARNING": 0, "DANGER": 0}
             max_risk: str | None = None
             processed = 0
@@ -463,6 +479,14 @@ class VideoProcessingService:
                 self.repository.set_preview(job_id, processed, preview)
 
                 risk = assessed.risk_level.value
+                self._persist_risk_snapshot(
+                    job_id=job_id,
+                    frame_index=processed - 1,
+                    timestamp_seconds=timestamp_seconds,
+                    risk_level=risk,
+                    original=original,
+                    assessed=assessed,
+                )
                 self.repository.append_frame_result(
                     job_id,
                     FrameRiskResult(
@@ -490,7 +514,7 @@ class VideoProcessingService:
                     if total_frames > 0
                     else 0.0
                 )
-                self.repository.update(
+                updated_job = self.repository.update(
                     job_id,
                     current_frame=processed,
                     progress=round(progress, 2),
@@ -502,6 +526,8 @@ class VideoProcessingService:
                     warning_frame_count=counts["WARNING"],
                     danger_frame_count=counts["DANGER"],
                 )
+                if self.history_service is not None:
+                    self.history_service.persist_video_progress(updated_job)
                 LOGGER.info(
                     "=== END | OPERATION=VIDEO_FRAME | JOB_ID=%s | FRAME=%s | "
                     "TOTAL_FRAMES=%s | DURATION_MS=%.3f | RISK_LEVEL=%s | "
@@ -547,7 +573,9 @@ class VideoProcessingService:
             completed_job = current.with_changes(**completion_changes)
             with log_operation(LOGGER, "write_video_report", job_id=job_id):
                 write_video_report(completed_job)
-            self.repository.update(job_id, **completion_changes)
+            completed_job = self.repository.update(job_id, **completion_changes)
+            if self.history_service is not None:
+                self.history_service.complete_video(completed_job)
             LOGGER.info(
                 "=== END | OPERATION=VIDEO_JOB_PROCESSING | JOB_ID=%s | "
                 "DURATION_MS=%.3f | PROCESSED_FRAMES=%s | AVERAGE_FPS=%.3f | "
@@ -573,6 +601,8 @@ class VideoProcessingService:
                 error=_public_error(error),
                 completed_at=datetime.now(UTC),
             )
+            if self.history_service is not None:
+                self.history_service.fail_job(job_id, _public_error(error))
         finally:
             if segment_recorder is not None:
                 segment_recorder.abort()
@@ -589,6 +619,70 @@ class VideoProcessingService:
             job_id,
             risk_segments=(*job.risk_segments, segment),
         )
+
+    def _persist_risk_snapshot(
+        self,
+        *,
+        job_id: str,
+        frame_index: int,
+        timestamp_seconds: float,
+        risk_level: RiskLevelValue,
+        original: NDArray[np.uint8],
+        assessed: ProcessedFrame,
+    ) -> None:
+        history = self.history_service
+        root = self.snapshot_evidence_root
+        if history is None or root is None:
+            return
+        if not history.should_capture_snapshot(
+            job_id,
+            timestamp_sec=timestamp_seconds,
+            risk_level=risk_level,
+        ):
+            return
+        if assessed.pseudo_bev_bgr is None:
+            LOGGER.warning(
+                "=== WARNING | SNAPSHOT_EVIDENCE_MISSING | JOB_ID=%s | FRAME=%s ===",
+                job_id,
+                frame_index,
+            )
+            return
+        snapshot_id = uuid4().hex
+        relative_root = Path(job_id) / "snapshots" / snapshot_id
+        output_root = root / relative_root
+        try:
+            output_root.mkdir(parents=True, exist_ok=False)
+            original_path = output_root / "original.png"
+            rgb_path = output_root / "rgb.png"
+            pseudo_bev_path = output_root / "pseudo_bev.png"
+            _write_png(original_path, original)
+            _write_png(rgb_path, assessed.annotated_bgr)
+            _write_png(pseudo_bev_path, assessed.pseudo_bev_bgr)
+            url_root = "/evidence/" + relative_root.as_posix()
+            history.persist_snapshot(
+                RiskSnapshotRecord(
+                    snapshot_id=snapshot_id,
+                    job_id=job_id,
+                    frame_index=frame_index,
+                    timestamp_sec=timestamp_seconds,
+                    risk_level=risk_level,  # type: ignore[arg-type]
+                    confidence=assessed.confidence,
+                    assessment_reliable=assessed.assessment_reliable,
+                    quality_reasons=assessed.quality_reasons,
+                    evidence_path=f"{url_root}/{original_path.name}",
+                    rgb_evidence_path=f"{url_root}/{rgb_path.name}",
+                    pseudo_bev_path=f"{url_root}/{pseudo_bev_path.name}",
+                    created_at=datetime.now(UTC),
+                )
+            )
+        except Exception as error:
+            LOGGER.exception(
+                "=== ERROR | OPERATION=PERSIST_SNAPSHOT_EVIDENCE | "
+                "JOB_ID=%s | FRAME=%s | ERROR_TYPE=%s ===",
+                job_id,
+                frame_index,
+                type(error).__name__,
+            )
 
     def _finalize_segment_codecs(self, job_id: str) -> None:
         job = self.repository.get(job_id)

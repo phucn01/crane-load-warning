@@ -10,6 +10,7 @@ requires-python = ">=3.11,<3.14"
 dependencies = [
     # depth-anything-3 0.1.1 imports addict but omits it from Requires-Dist.
     "addict>=2.4",
+    "alembic>=1.14,<2",
     "depth-anything-3>=0.1.1",
     "fastapi>=0.115,<1",
     "imageio-ffmpeg>=0.5,<1",
@@ -17,9 +18,12 @@ dependencies = [
     "numpy>=1.26",
     "opencv-python>=4.10",
     "Pillow>=10",
+    "python-dotenv>=1.0,<2",
     "python-multipart>=0.0.20",
+    "psycopg[binary]>=3.2,<4",
     "PyYAML>=6.0",
     "rfdetr>=1.9",
+    "SQLAlchemy>=2.0,<3",
     "torch>=2.2",
     "ultralytics>=8.3",
     "uvicorn[standard]>=0.34",

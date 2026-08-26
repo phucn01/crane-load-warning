@@ -4,6 +4,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VideoReport } from "../types/detection";
 import VideoReportPage from "./VideoReportPage";
 
+const snapshots = [0, 48, 96, 144].map((frameIndex, index) => ({
+  id: `snapshot-${index + 1}`,
+  job_id: "job-1",
+  frame_index: frameIndex,
+  timestamp_sec: frameIndex / 24,
+  risk_level: index < 3 ? "DANGER" as const : "WARNING" as const,
+  confidence: 0.9,
+  assessment_reliable: true,
+  quality_reasons: [],
+  evidence_path: `/evidence/snapshot-${index + 1}/original.png`,
+  rgb_evidence_path: `/evidence/snapshot-${index + 1}/rgb.png`,
+  pseudo_bev_path: `/evidence/snapshot-${index + 1}/bev.png`,
+  created_at: "2026-08-25T01:00:00+00:00",
+}));
+
 const report: VideoReport = {
   schema_version: "1.0",
   job_id: "job-1",
@@ -87,6 +102,8 @@ describe("VideoReportPage", () => {
               next_after_frame: 100,
               has_more: false,
             }
+          : url.includes("/risk-snapshots?")
+            ? { items: snapshots, total: snapshots.length, limit: 200, offset: 0 }
           : report;
         return Promise.resolve(new Response(JSON.stringify(payload), {
           status: 200,
@@ -102,6 +119,10 @@ describe("VideoReportPage", () => {
     expect(screen.getByText("70")).toBeInTheDocument();
     expect(screen.getByText("8 danger")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Risk timeline" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Risk snapshots" })).toBeInTheDocument();
+    expect(screen.getByText("4 snapshots")).toBeInTheDocument();
+    expect(screen.getByText("Frame 145")).toBeInTheDocument();
+    expect(screen.getByText("1 key frames")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Annotated evidence frame 30" })).toHaveAttribute(
       "src",
       "http://localhost:8000/api/v1/jobs/job-1/segments/segment-1/evidence/30/rgb",
@@ -110,10 +131,59 @@ describe("VideoReportPage", () => {
       "href",
       "http://localhost:8000/api/v1/jobs/job-1/download",
     );
+    expect(screen.getByRole("link", { name: "History" })).toHaveAttribute(
+      "href",
+      "/?history=1",
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Review frame" })[3]);
+    expect(screen.getByRole("heading", { name: "Snapshot frame 145" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Annotated snapshot frame 145" })).toHaveAttribute(
+      "src",
+      "http://localhost:8000/evidence/snapshot-4/rgb.png",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Inspect evidence" }));
+    expect(screen.getByRole("heading", { name: "WARNING / DANGER segments" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /DANGER: frames 30 to 30/i }));
     expect(document.querySelector("video")?.currentTime).toBe(2.9);
     fireEvent.click(screen.getByRole("button", { name: "Open full evidence viewer" }));
     expect(screen.getByRole("dialog", { name: "Frame 30 evidence" })).toBeInTheDocument();
+  });
+
+  it("keeps the persisted report usable when the in-memory timeline is gone", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation((input: string) => {
+        if (String(input).includes("/frames?")) {
+          return Promise.resolve(new Response(JSON.stringify({ detail: "not found" }), {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        if (String(input).includes("/risk-snapshots?")) {
+          return Promise.resolve(new Response(JSON.stringify({
+            items: snapshots,
+            total: snapshots.length,
+            limit: 200,
+            offset: 0,
+          }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }));
+        }
+        return Promise.resolve(new Response(JSON.stringify(report), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }));
+      }),
+    );
+
+    render(<VideoReportPage jobId="job-1" />);
+
+    expect(await screen.findByRole("heading", { name: "Crane load safety report" })).toBeInTheDocument();
+    expect(screen.getByText(/timeline is no longer in memory/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "WARNING / DANGER segments" })).toBeInTheDocument();
   });
 });

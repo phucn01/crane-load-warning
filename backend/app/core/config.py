@@ -31,6 +31,9 @@ class Settings:
         "http://localhost:5173",
         "http://127.0.0.1:5173",
     )
+    database_url: str | None = None
+    database_job_update_interval: int = 10
+    persistence_config: Path | None = None
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -81,6 +84,18 @@ class Settings:
                 "CRANE_CORS_ORIGINS",
                 ("http://localhost:5173", "http://127.0.0.1:5173"),
             ),
+            database_url=(
+                _optional_environment_string("DATABASE_URL")
+                or _optional_environment_string("CRANE_DATABASE_URL")
+            ),
+            database_job_update_interval=_positive_int_environment(
+                "CRANE_DATABASE_JOB_UPDATE_INTERVAL",
+                10,
+            ),
+            persistence_config=_environment_path(
+                "CRANE_PERSISTENCE_CONFIG",
+                PROJECT_ROOT / "configs" / "persistence.example.yaml",
+            ),
         )
 
 
@@ -92,6 +107,11 @@ def _environment_path(name: str, default: Path) -> Path:
 def _optional_environment_path(name: str) -> Path | None:
     value = os.getenv(name)
     return Path(value).expanduser().resolve() if value else None
+
+
+def _optional_environment_string(name: str) -> str | None:
+    value = os.getenv(name)
+    return value.strip() if value and value.strip() else None
 
 
 def _positive_int_environment(name: str, default: int) -> int:

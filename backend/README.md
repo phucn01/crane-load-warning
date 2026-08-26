@@ -86,7 +86,12 @@ Swagger UI is available at `http://127.0.0.1:8000/docs`. The v1 endpoints are:
   `png`)
 - `POST /api/v1/detection/video` with multipart field `file` (`mp4`, `mov`,
   `avi`, `mkv`, or `webm`); returns an in-memory job after upload
+- `GET /api/v1/jobs?status=&media_type=&from=&to=&limit=50&offset=0` for
+  persisted image/video processing history
 - `GET /api/v1/jobs/{job_id}` for progress and frame-risk statistics
+- `GET /api/v1/risk-snapshots?job_id=&risk_level=&from=&to=&limit=50&offset=0`
+  for sampled WARNING/DANGER evidence
+- `GET /api/v1/risk-snapshots/{snapshot_id}` for one risk snapshot
 - `GET /api/v1/jobs/{job_id}/frames?after_frame=0&limit=200` for ordered,
   paginated per-frame risk results (`frame_number`, timestamp, and
   `SAFE`/`WARNING`/`DANGER`); use `next_after_frame` as the next polling cursor
@@ -133,6 +138,62 @@ Optional environment settings:
 - `CRANE_LOG_FILE` (default `backend/logs/backend.log`)
 - `CRANE_LOG_MAX_BYTES` (default `10485760`, then the file rotates)
 - `CRANE_LOG_BACKUP_COUNT` (default `5` rotated files)
+- `DATABASE_URL` (backend-only PostgreSQL connection string)
+- `CRANE_DATABASE_JOB_UPDATE_INTERVAL` (default `10` video frames)
+- `CRANE_PERSISTENCE_CONFIG` (default `configs/persistence.example.yaml`)
+
+### Supabase/PostgreSQL analysis persistence
+
+Supabase is used as managed PostgreSQL; the browser never connects to it. The
+backend uses SQLAlchemy 2.x and psycopg so domain services remain portable to
+another PostgreSQL provider. Copy `.env.example` and set `DATABASE_URL` only in
+the backend environment. FastAPI and Alembic automatically load the root `.env`
+file when it exists; existing process environment variables take precedence.
+
+Connection choice:
+
+- Local development or Alembic migrations: use the direct connection when the
+  machine supports IPv6; otherwise use the Supabase session pooler.
+- A persistent deployed backend on an IPv4 network: use the session pooler on
+  port `5432`.
+- Do not use the transaction pooler for Alembic migrations.
+
+Example for PowerShell:
+
+```powershell
+$env:DATABASE_URL = "postgresql+psycopg://USER:PASSWORD@HOST:5432/postgres?sslmode=require"
+alembic upgrade head
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Run the migration from `backend/`. Alembic is the schema source of truth and
+creates `processing_jobs` plus `risk_snapshots`. Application startup does not
+create tables automatically. Never expose `DATABASE_URL`, a database password,
+or a Supabase service-role key through a `VITE_*` variable because those values
+are compiled into the browser bundle.
+
+Database-related settings:
+
+- `DATABASE_URL` enables PostgreSQL persistence when set
+- `CRANE_DATABASE_URL` is accepted temporarily as a backwards-compatible alias
+- `CRANE_DATABASE_JOB_UPDATE_INTERVAL` (default `10` frames)
+- `CRANE_PERSISTENCE_CONFIG` selects the snapshot sampling policy YAML
+
+Both image and video lifecycle records use `processing_jobs`. Only sampled
+WARNING/DANGER observations use `risk_snapshots`; a snapshot is frame evidence,
+not a tracked safety event. The default policy saves at most one snapshot every
+two seconds per job, while a WARNING-to-DANGER escalation can be saved
+immediately. It is configured in `configs/persistence.example.yaml`.
+
+Realtime video state, preview JPEGs, and the complete per-frame timeline remain
+in memory. PostgreSQL receives progress every configured N frames and always
+receives the final summary; it is not used as a realtime state bus. Database
+write failures are logged and do not stop inference. Uploaded image/video bytes
+and evidence binaries are not stored in PostgreSQL; only paths and metadata are
+stored. Use a persistent filesystem volume when deploying evidence.
+
+When `DATABASE_URL` is absent, the same repository interfaces use in-memory
+history for local development and tests. That fallback is lost on restart.
 
 The API writes the same structured logs to stdout and the rotating log file.
 Every HTTP request receives an `X-Request-ID`; that ID is included in its log

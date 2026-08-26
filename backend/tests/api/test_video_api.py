@@ -273,6 +273,30 @@ def test_blocking_inference_does_not_block_status_or_health_api(tmp_path: Path) 
         assert _wait_for_terminal(client, job_id)["status"] == "completed"
 
 
+def test_completed_report_artifacts_survive_runtime_job_cleanup(tmp_path: Path) -> None:
+    service = FakeFrameProcessor((RiskLevel.WARNING, RiskLevel.DANGER))
+    with _client(tmp_path, service) as client:
+        created = client.post(
+            "/api/v1/detection/video",
+            files={"file": ("clip.avi", _video_bytes(tmp_path), "video/x-msvideo")},
+        ).json()
+        job = _wait_for_terminal(client, created["job_id"])
+        segment = job["risk_segments"][0]
+        evidence = segment["frame_evidence"][0]
+
+        repository = client.app.state.video_job_repository
+        assert repository.remove(created["job_id"]) is not None
+
+        assert client.get(job["report_url"]).status_code == 200
+        assert client.get(job["result_url"]).status_code == 200
+        assert client.get(job["download_url"]).status_code == 200
+        assert client.get(segment["result_url"]).status_code == 200
+        assert client.get(evidence["original_url"]).status_code == 200
+        assert client.get(evidence["rgb_url"]).status_code == 200
+        assert client.get(evidence["pseudo_bev_url"]).status_code == 200
+        assert client.get(job["frame_results_url"]).status_code == 404
+
+
 def test_invalid_video_becomes_failed_job(tmp_path: Path) -> None:
     with _client(tmp_path, FakeFrameProcessor((RiskLevel.SAFE,))) as client:
         response = client.post(

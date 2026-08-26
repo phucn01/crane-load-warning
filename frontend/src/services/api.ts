@@ -1,5 +1,7 @@
 import type {
   ImageDetectionResponse,
+  ProcessingJobHistoryPage,
+  RiskSnapshotHistoryPage,
   VideoJob,
   VideoJobCreated,
   VideoFrameRiskResultsPage,
@@ -120,11 +122,60 @@ export async function getAllVideoFrameResults(
   return results;
 }
 
-export async function getVideoReport(jobId: string): Promise<VideoReport> {
+export async function getVideoReport(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<VideoReport> {
   return requestJson<VideoReport>(
     `/api/v1/jobs/${encodeURIComponent(jobId)}/report`,
-    {},
+    { signal },
   );
+}
+
+export async function getProcessingHistory(
+  filters: { status?: string; mediaType?: string } = {},
+  signal?: AbortSignal,
+): Promise<ProcessingJobHistoryPage> {
+  const query = new URLSearchParams({ limit: "50", offset: "0" });
+  if (filters.status) query.set("status", filters.status);
+  if (filters.mediaType) query.set("media_type", filters.mediaType);
+  return requestJson<ProcessingJobHistoryPage>(`/api/v1/jobs?${query}`, { signal });
+}
+
+export async function getRiskSnapshotHistory(
+  filters: {
+    riskLevel?: string;
+    jobId?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+  signal?: AbortSignal,
+): Promise<RiskSnapshotHistoryPage> {
+  const query = new URLSearchParams({
+    limit: String(filters.limit ?? 50),
+    offset: String(filters.offset ?? 0),
+  });
+  if (filters.riskLevel) query.set("risk_level", filters.riskLevel);
+  if (filters.jobId) query.set("job_id", filters.jobId);
+  return requestJson<RiskSnapshotHistoryPage>(
+    `/api/v1/risk-snapshots?${query}`,
+    { signal },
+  );
+}
+
+export async function getAllRiskSnapshotsForJob(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<RiskSnapshotHistoryPage["items"]> {
+  const items: RiskSnapshotHistoryPage["items"] = [];
+  const limit = 200;
+  let offset = 0;
+  while (true) {
+    const page = await getRiskSnapshotHistory({ jobId, limit, offset }, signal);
+    items.push(...page.items);
+    offset += page.items.length;
+    if (offset >= page.total || page.items.length === 0) return items;
+  }
 }
 
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {

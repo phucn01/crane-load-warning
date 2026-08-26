@@ -27,7 +27,12 @@ class FakeImageProcessingService:
             "models_loaded": {"fake": True},
         }
 
-    def process(self, image_bgr: np.ndarray) -> ImageDetectionResponse:
+    def process(
+        self,
+        image_bgr: np.ndarray,
+        *,
+        run_id: str | None = None,
+    ) -> ImageDetectionResponse:
         self.calls += 1
         if self.failure is not None:
             raise self.failure
@@ -64,7 +69,7 @@ class FakeImageProcessingService:
                 },
                 "metadata": {
                     "pipeline_version": "test-pipeline",
-                    "frame_id": "test-frame",
+                    "frame_id": run_id or "test-frame",
                     "image_width": int(image_bgr.shape[1]),
                     "image_height": int(image_bgr.shape[0]),
                     "depth": {
@@ -110,6 +115,7 @@ def test_health_reports_process_and_pipeline_readiness(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
+        "persistence_backend": "memory",
         "pipeline_ready": True,
         "pipeline_version": "test-pipeline",
         "models_loaded": {"fake": True},
@@ -179,6 +185,46 @@ def test_mocked_image_analysis_returns_public_contract(tmp_path: Path) -> None:
     assert response.json()["assessment"]["risk_level"] == "WARNING"
     assert response.json()["metadata"]["image_width"] == 24
     assert service.calls == 1
+
+
+def test_completed_image_analysis_appears_in_job_history(tmp_path: Path) -> None:
+    service = FakeImageProcessingService()
+    with _client(tmp_path, service) as client:
+        created = client.post(
+            "/api/v1/detection/image",
+            files={"file": ("crane.png", _png_bytes(), "image/png")},
+        )
+        history = client.get("/api/v1/jobs")
+        job_id = created.json()["metadata"]["frame_id"]
+        detail = client.get(f"/api/v1/jobs/{job_id}")
+
+    assert created.status_code == 200
+    assert history.status_code == 200
+    assert history.json()["total"] == 1
+    job = history.json()["items"][0]
+    assert job["id"] == created.json()["metadata"]["frame_id"]
+    assert job["media_type"] == "image"
+    assert job["status"] == "completed"
+    assert job["max_risk_level"] == "WARNING"
+    assert detail.status_code == 200
+    assert detail.json()["id"] == job_id
+
+
+def test_warning_image_creates_risk_snapshot(tmp_path: Path) -> None:
+    with _client(tmp_path, FakeImageProcessingService()) as client:
+        created = client.post(
+            "/api/v1/detection/image",
+            files={"file": ("crane.png", _png_bytes(), "image/png")},
+        )
+        response = client.get("/api/v1/risk-snapshots")
+
+    assert created.status_code == 200
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    snapshot = response.json()["items"][0]
+    assert snapshot["risk_level"] == "WARNING"
+    assert snapshot["job_id"] == created.json()["metadata"]["frame_id"]
+    assert snapshot["frame_index"] is None
 
 
 def test_pipeline_exception_returns_sanitized_500(tmp_path: Path) -> None:

@@ -70,3 +70,10 @@ npm test
 
 > Current video processing evaluates detections independently per frame. Cross-frame person/load identity is intentionally not tracked.
 
+## History
+
+Open `/?history=1` or use the **History** link in the header. The page reads
+processing jobs and sampled WARNING/DANGER risk snapshots exclusively through
+the FastAPI endpoints. It never connects to Supabase directly. Risk snapshots
+are time/frame evidence and are intentionally not labelled as safety events.
+
