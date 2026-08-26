@@ -211,8 +211,6 @@ export default function VideoReportPage({ jobId }: { jobId: string }) {
           <ReportMetric label="Safe frames" value={report.summary.safe_frames} tone="safe" />
           <ReportMetric label="Warning frames" value={report.summary.warning_frames} detail={`${warningRate}% of video`} tone="warning" />
           <ReportMetric label="Danger frames" value={report.summary.danger_frames} detail={`${dangerRate}% of video`} tone="danger" />
-          <ReportMetric label="Risk segments" value={report.summary.risk_segment_count} />
-          <ReportMetric label="Risk snapshots" value={riskSnapshots.length} />
         </section>
 
         <section className="report-section report-video-section">
@@ -247,6 +245,7 @@ export default function VideoReportPage({ jobId }: { jobId: string }) {
             currentTime={currentTime}
             duration={duration}
             onSeek={selectTimestamp}
+            showMarkers={false}
           />
         </section>
 

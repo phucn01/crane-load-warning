@@ -19,6 +19,7 @@ interface Props {
   currentTime: number;
   duration: number;
   onSeek: (timestampSeconds: number) => void;
+  showMarkers?: boolean;
 }
 
 const LEVELS: RiskLevel[] = ["SAFE", "WARNING", "DANGER"];
@@ -54,6 +55,7 @@ export default function RiskTimeline({
   currentTime,
   duration,
   onSeek,
+  showMarkers = true,
 }: Props) {
   const runs = buildRiskRuns(results);
   const frameExtent = Math.max(totalFrames, results.at(-1)?.frame_number ?? 0, 1);
@@ -89,7 +91,7 @@ export default function RiskTimeline({
       <div className="risk-timeline-summary" aria-label="Frame risk totals">
         {counts.map(({ level, count }) => (
           <span key={level} className={`timeline-summary-${level.toLowerCase()}`}>
-            <i aria-hidden="true" /> {level} <strong>{count}</strong>
+            {showMarkers && <i aria-hidden="true" />} {level} <strong>{count}</strong>
           </span>
         ))}
         <span className="timeline-frame-total">{results.length} / {frameExtent} frames mapped</span>
@@ -118,7 +120,7 @@ export default function RiskTimeline({
               />
             );
           })}
-          {evidence.map((item) => {
+          {showMarkers && evidence.map((item) => {
             const left = (item.frame_number - 0.5) * 100 / frameExtent;
             return (
               <button
@@ -146,7 +148,9 @@ export default function RiskTimeline({
       </div>
 
       <p className="risk-timeline-help">
-        Select a colored range or evidence marker to jump to that moment in the processed video.
+        {showMarkers
+          ? "Select a colored range or evidence marker to jump to that moment in the processed video."
+          : "Select a colored range to jump to that moment in the processed video."}
       </p>
     </section>
   );

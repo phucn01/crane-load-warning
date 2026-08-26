@@ -160,6 +160,7 @@ describe("VideoProcessingView", () => {
       "href",
       "/?report=job-1",
     );
+    expect(screen.getByRole("link", { name: "View report" })).not.toHaveAttribute("target");
     expect(screen.getByRole("link", { name: "Download video" })).toHaveAttribute(
       "href",
       "http://localhost:8000/api/v1/jobs/job-1/download",

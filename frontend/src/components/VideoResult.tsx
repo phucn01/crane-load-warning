@@ -68,8 +68,6 @@ export default function VideoResult({ job, frameResults }: Props) {
           <a
             className="button button-secondary"
             href={`/?report=${encodeURIComponent(job.job_id)}`}
-            target="_blank"
-            rel="noreferrer"
           >
             View report
           </a>

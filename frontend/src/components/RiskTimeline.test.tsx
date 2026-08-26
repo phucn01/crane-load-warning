@@ -70,4 +70,33 @@ describe("RiskTimeline", () => {
     expect(onSeek).toHaveBeenNthCalledWith(1, 0.2);
     expect(onSeek).toHaveBeenNthCalledWith(2, 0.3);
   });
+
+  it("hides dot markers while keeping colored ranges seekable", () => {
+    const onSeek = vi.fn();
+    const { container } = render(
+      <RiskTimeline
+        results={results}
+        evidence={[
+          {
+            frame_number: 4,
+            timestamp_seconds: 0.3,
+            risk_level: "DANGER",
+            original_url: "/original",
+            rgb_url: "/rgb",
+            pseudo_bev_url: "/bev",
+          },
+        ]}
+        totalFrames={5}
+        currentTime={0.3}
+        duration={0.5}
+        onSeek={onSeek}
+        showMarkers={false}
+      />,
+    );
+
+    expect(container.querySelector(".risk-timeline-summary i")).not.toBeInTheDocument();
+    expect(container.querySelector(".risk-evidence-marker")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /WARNING: frames 3 to 3/i }));
+    expect(onSeek).toHaveBeenCalledWith(0.2);
+  });
 });
