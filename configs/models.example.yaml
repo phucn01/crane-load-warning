@@ -5,6 +5,9 @@ device: auto  # auto, cpu, cuda, cuda:0, or a GPU index
 
 rfdetr:
   checkpoint: ../data/models/rfdetr_medium/checkpoint_best_total.pth
+  auto_download: true
+  huggingface_repo: phucn001/crane_safety_zone_model
+  huggingface_filename: checkpoint_best_total.pth
   confidence: 0.25
   num_classes: 2
   class_names:

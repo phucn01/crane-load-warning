@@ -125,9 +125,7 @@ def build_model_manager(
     yolo = _section(config, "yolo_person")
     da3 = _section(config, "depth_anything_v3")
 
-    rfdetr_checkpoint = _resolve_required_path(
-        rfdetr.get("checkpoint"), base_dir, "rfdetr.checkpoint"
-    )
+    rfdetr_checkpoint = _resolve_rfdetr_checkpoint(rfdetr, base_dir)
     yolo_checkpoint = _resolve_required_path(
         yolo.get("checkpoint"), base_dir, "yolo_person.checkpoint"
     )
@@ -194,6 +192,33 @@ def _resolve_required_path(value: Any, base_dir: Path, field: str) -> Path:
     if not path.is_absolute():
         path = base_dir / path
     return path.resolve()
+
+
+def _resolve_rfdetr_checkpoint(section: Mapping[str, Any], base_dir: Path) -> Path:
+    checkpoint = _resolve_required_path(section.get("checkpoint"), base_dir, "rfdetr.checkpoint")
+    if checkpoint.is_file():
+        return checkpoint
+    if not bool(section.get("auto_download", True)):
+        return checkpoint
+    repo_id = str(section.get("huggingface_repo", "")).strip()
+    filename = str(section.get("huggingface_filename", checkpoint.name)).strip()
+    if not repo_id:
+        return checkpoint
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("huggingface-hub is required to download RF-DETR") from exc
+    checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    LOGGER.info("Downloading RF-DETR checkpoint repo=%s filename=%s", repo_id, filename)
+    downloaded = hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        local_dir=str(checkpoint.parent),
+    )
+    downloaded_path = Path(downloaded).resolve()
+    if downloaded_path != checkpoint and downloaded_path.is_file():
+        downloaded_path.replace(checkpoint)
+    return checkpoint
 
 
 def _normalise_device(value: Any) -> str | int | None:

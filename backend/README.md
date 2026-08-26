@@ -10,6 +10,32 @@ The image entry point runs the current safety pipeline:
 
 Depth values are relative and must not be interpreted as metric distances.
 
+## Model repositories
+
+The pipeline uses two specialized detectors. Each model is responsible for a
+different type of object:
+
+### Hanging-load detection — RF-DETR
+
+The system uses the [Crane Safety Zone Model](https://huggingface.co/phucn001/crane_safety_zone_model)
+checkpoint to detect:
+
+- `hanging_object`
+- `hanging_rope`
+
+### Person detection — YOLO26m-seg
+
+People are detected with the Ultralytics YOLO26m-seg model, which is downloaded
+from Ultralytics when the configured local weight is missing.
+
+### Fine-tuned models
+
+- [HANGCON RF-DETR Medium](https://huggingface.co/phucn001/hangcon-rfdetr-medium) — fine-tuned only for `hanging_object` and `hanging_rope`.
+- [HANGCON YOLO26 Base](https://huggingface.co/phucn001/hangcon-yolo26-base) — fine-tuned only for `hanging_object` and `hanging_rope`.
+
+The fine-tuned label scope is limited to these two classes and is not a
+general-purpose object-detection model.
+
 ## Install
 
 From `backend/`:
@@ -19,7 +45,8 @@ python -m pip install -e ".[dev]"
 ```
 
 Copy `configs/models.example.yaml` to `configs/models.local.yaml` and update
-the RF-DETR checkpoint path. YOLO defaults to `auto_download: true`: when
+the RF-DETR checkpoint path. RF-DETR can download automatically from
+`phucn001/crane_safety_zone_model` when the local checkpoint is missing. YOLO defaults to `auto_download: true`: when
 `data/models/yolo26_medium/yolo26m-seg.pt` is absent, Ultralytics downloads the
 official weight once into that Git-ignored location and reuses it on later
 runs. Set `auto_download: false` for an offline-only deployment. Model weights

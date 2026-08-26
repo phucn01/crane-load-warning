@@ -10,6 +10,34 @@ Computer-vision safety system for detecting people beneath hanging loads and rai
 - `configs/`: configuration templates are added with the relevant feature.
 - `docs/`: architecture, safety-rule, and deployment documentation.
 
+## Install and run the backend
+
+From the repository root, create a virtual environment and install the backend
+dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".\backend[dev]"
+```
+
+Create the local model configuration from the example file:
+
+```powershell
+Copy-Item configs\models.example.yaml configs\models.local.yaml
+```
+
+Start the FastAPI backend:
+
+```powershell
+python -m uvicorn app.main:app --app-dir backend --host 127.0.0.1 --port 8000
+```
+
+The API is available at `http://127.0.0.1:8000`, with Swagger UI at
+`http://127.0.0.1:8000/docs`. The first startup may download the configured
+RF-DETR checkpoint from Hugging Face when it is not present locally.
+
 ## Run the image safety pipeline
 
 The backend runs Vision, Geometry, Risk, and Annotation for one local image.
@@ -29,6 +57,35 @@ python backend/scripts/run_image.py `
 
 See `backend/README.md` for installation and artifact details. Relative depth
 and Pseudo-BEV geometry are non-metric until camera calibration exists.
+
+## Vision models
+
+The pipeline uses two specialized detectors. Each model is responsible for a
+different type of object:
+
+### Hanging-load detection — RF-DETR
+
+The system uses the [Crane Safety Zone Model](https://huggingface.co/phucn001/crane_safety_zone_model)
+checkpoint to detect:
+
+- `hanging_object`
+- `hanging_rope`
+
+### Person detection — YOLO26m-seg
+
+People are detected with the Ultralytics YOLO26m-seg model, which is downloaded
+from Ultralytics when the configured local weight is missing.
+
+### Fine-tuned models
+
+- [HANGCON RF-DETR Medium](https://huggingface.co/phucn001/hangcon-rfdetr-medium) — fine-tuned for `hanging_object` and `hanging_rope`.
+- [HANGCON YOLO26 Base](https://huggingface.co/phucn001/hangcon-yolo26-base) — fine-tuned for `hanging_object` and `hanging_rope`.
+
+The fine-tuned label scope is limited to these two hanging-load classes; it
+does not represent a general-purpose object detector.
+
+The RF-DETR checkpoint is downloaded automatically into
+`data/models/rfdetr_medium/` when it is not available locally.
 
 ## Run the image assessment interface
 
