@@ -70,8 +70,8 @@ class GeometryResponse(StrictSchema):
     coordinate_system: Literal["relative_pseudo_bev_not_metric"] = (
         "relative_pseudo_bev_not_metric"
     )
-    depth_low: float
-    depth_high: float
+    depth_low: float | None
+    depth_high: float | None
     quality_reasons: list[str]
     persons: list[PersonGeometry]
     loads: list[LoadGeometry]
@@ -123,7 +123,7 @@ class ProcessingMetadata(StrictSchema):
     frame_id: str
     image_width: int
     image_height: int
-    depth: DepthMetadata
+    depth: DepthMetadata | None
     models_loaded: dict[str, bool]
     config_versions: dict[str, str]
 
@@ -131,6 +131,7 @@ class ProcessingMetadata(StrictSchema):
 class ImageDetectionResponse(StrictSchema):
     status: Literal["completed"] = "completed"
     processing_time_ms: float = Field(ge=0.0)
+    assessment_status: str = "FULL_EVALUATION"
     assessment: AssessmentResponse
     summary: DetectionSummary
     detections: list[DetectionItem]

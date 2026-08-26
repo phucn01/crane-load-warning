@@ -58,22 +58,22 @@ class ProcessingJobRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    snapshots: Mapped[list[RiskSnapshotRow]] = relationship(
+    snapshots: Mapped[list[FrameAssessmentRow]] = relationship(
         back_populates="job",
         cascade="all, delete-orphan",
     )
 
 
-class RiskSnapshotRow(Base):
-    __tablename__ = "risk_snapshots"
+class FrameAssessmentRow(Base):
+    __tablename__ = "frame_assessments"
     __table_args__ = (
         CheckConstraint(
-            "risk_level in ('WARNING', 'DANGER')",
+            "risk_level is null or risk_level in ('SAFE', 'WARNING', 'DANGER')",
             name="ck_snapshot_risk_level",
         ),
-        Index("ix_risk_snapshots_job_id", "job_id"),
-        Index("ix_risk_snapshots_created_at", "created_at"),
-        Index("ix_risk_snapshots_risk_level", "risk_level"),
+        Index("ix_frame_assessments_job_id", "job_id"),
+        Index("ix_frame_assessments_created_at", "created_at"),
+        Index("ix_frame_assessments_risk_level", "risk_level"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
@@ -84,9 +84,10 @@ class RiskSnapshotRow(Base):
     )
     frame_index: Mapped[int | None] = mapped_column(Integer)
     timestamp_sec: Mapped[float | None] = mapped_column(Float)
-    risk_level: Mapped[str] = mapped_column(String(16), nullable=False)
+    risk_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    assessment_status: Mapped[str] = mapped_column(String(32), nullable=False, default="FULL_EVALUATION")
     confidence: Mapped[float | None] = mapped_column(Float)
-    assessment_reliable: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    assessment_reliable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     quality_reasons: Mapped[list[str]] = mapped_column(JSON, nullable=False)
     evidence_path: Mapped[str | None] = mapped_column(Text)
     rgb_evidence_path: Mapped[str | None] = mapped_column(Text)
@@ -95,4 +96,6 @@ class RiskSnapshotRow(Base):
     job: Mapped[ProcessingJobRow] = relationship(back_populates="snapshots")
 
 
-__all__ = ["ProcessingJobRow", "RiskSnapshotRow"]
+RiskSnapshotRow = FrameAssessmentRow
+
+__all__ = ["FrameAssessmentRow", "ProcessingJobRow", "RiskSnapshotRow"]

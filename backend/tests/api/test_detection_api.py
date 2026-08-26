@@ -96,6 +96,7 @@ def _client(tmp_path: Path, service: FakeImageProcessingService) -> TestClient:
         geometry_config=placeholder,
         risk_config=placeholder,
         evidence_root=tmp_path / "evidence",
+        image_upload_root=tmp_path / "storage" / "uploads" / "images",
     )
     return TestClient(create_app(settings=settings, image_processing_service=service))
 
@@ -189,10 +190,11 @@ def test_mocked_image_analysis_returns_public_contract(tmp_path: Path) -> None:
 
 def test_completed_image_analysis_appears_in_job_history(tmp_path: Path) -> None:
     service = FakeImageProcessingService()
+    payload = _png_bytes()
     with _client(tmp_path, service) as client:
         created = client.post(
             "/api/v1/detection/image",
-            files={"file": ("crane.png", _png_bytes(), "image/png")},
+            files={"file": ("crane.png", payload, "image/png")},
         )
         history = client.get("/api/v1/jobs")
         job_id = created.json()["metadata"]["frame_id"]
@@ -206,15 +208,21 @@ def test_completed_image_analysis_appears_in_job_history(tmp_path: Path) -> None
     assert job["media_type"] == "image"
     assert job["status"] == "completed"
     assert job["max_risk_level"] == "WARNING"
+    input_path = Path(job["input_path"])
+    assert input_path.parent == tmp_path / "storage" / "uploads" / "images"
+    assert input_path.suffix == ".png"
+    assert input_path.read_bytes() == payload
     assert detail.status_code == 200
     assert detail.json()["id"] == job_id
+    assert detail.json()["input_path"] == str(input_path)
 
 
 def test_warning_image_creates_risk_snapshot(tmp_path: Path) -> None:
+    payload = _png_bytes()
     with _client(tmp_path, FakeImageProcessingService()) as client:
         created = client.post(
             "/api/v1/detection/image",
-            files={"file": ("crane.png", _png_bytes(), "image/png")},
+            files={"file": ("crane.png", payload, "image/png")},
         )
         response = client.get("/api/v1/risk-snapshots")
 
@@ -225,6 +233,13 @@ def test_warning_image_creates_risk_snapshot(tmp_path: Path) -> None:
     assert snapshot["risk_level"] == "WARNING"
     assert snapshot["job_id"] == created.json()["metadata"]["frame_id"]
     assert snapshot["frame_index"] is None
+    assert snapshot["evidence_path"] == (
+        f"/uploads/images/{snapshot['job_id']}.png"
+    )
+    original = client.get(snapshot["evidence_path"])
+    assert original.status_code == 200
+    assert original.headers["content-type"] == "image/png"
+    assert original.content == payload
 
 
 def test_pipeline_exception_returns_sanitized_500(tmp_path: Path) -> None:

@@ -25,7 +25,7 @@ const LEVELS: RiskLevel[] = ["SAFE", "WARNING", "DANGER"];
 
 export function buildRiskRuns(results: VideoFrameRiskResult[]): RiskRun[] {
   const runs: RiskRun[] = [];
-  for (const result of results) {
+  for (const result of results.filter((item): item is VideoFrameRiskResult & { risk_level: RiskLevel } => item.risk_level !== null)) {
     const current = runs[runs.length - 1];
     if (
       current
@@ -62,6 +62,7 @@ export default function RiskTimeline({
     count: results.filter((item) => item.risk_level === level).length,
   }));
   const activeFrame = frameAtTime(results, currentTime);
+  const skippedCount = results.filter((item) => item.risk_level === null).length;
   const playheadPercent = duration > 0
     ? Math.min(100, Math.max(0, currentTime * 100 / duration))
     : 0;
@@ -79,8 +80,8 @@ export default function RiskTimeline({
         <div className="risk-timeline-current" aria-live="polite">
           <span>Current frame</span>
           <strong>{activeFrame?.frame_number ?? 0}</strong>
-          <em className={`timeline-current-${activeFrame?.risk_level.toLowerCase() ?? "idle"}`}>
-            {activeFrame?.risk_level ?? "READY"}
+          <em className={`timeline-current-${activeFrame?.risk_level?.toLowerCase() ?? "idle"}`}>
+            {activeFrame?.risk_level ?? activeFrame?.assessment_status ?? "READY"}
           </em>
         </div>
       </div>
@@ -92,6 +93,7 @@ export default function RiskTimeline({
           </span>
         ))}
         <span className="timeline-frame-total">{results.length} / {frameExtent} frames mapped</span>
+        {skippedCount > 0 && <span className="timeline-frame-skipped">{skippedCount} skipped</span>}
       </div>
 
       <div className="risk-timeline-shell">

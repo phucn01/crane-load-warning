@@ -1,45 +1,61 @@
 import { useEffect, useState } from "react";
 
-import RiskSnapshotReviewModal from "../components/RiskSnapshotReviewModal";
-import {
-  apiUrl,
-  getProcessingHistory,
-  getRiskSnapshotHistory,
-} from "../services/api";
-import type {
-  ProcessingJobHistory,
-  RiskSnapshotHistory,
-} from "../types/detection";
+import ImageEvidenceReviewModal from "../components/ImageEvidenceReviewModal";
+import { getImageEvidence, getProcessingHistory, type ImageEvidenceViews } from "../services/api";
+import type { ProcessingJobHistory } from "../types/detection";
 
 export default function HistoryPage() {
+  const HISTORY_REQUEST_TIMEOUT_MS = 15000;
   const [jobs, setJobs] = useState<ProcessingJobHistory[]>([]);
-  const [snapshots, setSnapshots] = useState<RiskSnapshotHistory[]>([]);
   const [mediaType, setMediaType] = useState("");
   const [status, setStatus] = useState("");
-  const [riskLevel, setRiskLevel] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [reviewSnapshot, setReviewSnapshot] = useState<RiskSnapshotHistory | null>(null);
+  const [imageReview, setImageReview] = useState<{ name: string; views: ImageEvidenceViews } | null>(null);
+  const [imageReviewLoading, setImageReviewLoading] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
+    let active = true;
+    let timedOut = false;
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, HISTORY_REQUEST_TIMEOUT_MS);
     setLoading(true);
     setError(null);
-    Promise.all([
-      getProcessingHistory({ mediaType, status }, controller.signal),
-      getRiskSnapshotHistory({ riskLevel }, controller.signal),
-    ])
-      .then(([jobPage, snapshotPage]) => {
+    getProcessingHistory({ mediaType, status }, controller.signal)
+      .then((jobPage) => {
         setJobs(jobPage.items);
-        setSnapshots(snapshotPage.items);
       })
       .catch((caught: unknown) => {
-        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        if (caught instanceof DOMException && caught.name === "AbortError") {
+          if (timedOut) setError("History request timed out. Please try again.");
+          return;
+        }
         setError(caught instanceof Error ? caught.message : "Unable to load history.");
       })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [mediaType, status, riskLevel]);
+      .finally(() => {
+        window.clearTimeout(timeoutId);
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [mediaType, status]);
+
+  const reviewImage = async (job: ProcessingJobHistory) => {
+    setImageReviewLoading(job.id);
+    try {
+      setImageReview({ name: job.input_name, views: await getImageEvidence(job.id) });
+    } catch {
+      setError("Image evidence could not be loaded.");
+    } finally {
+      setImageReviewLoading(null);
+    }
+  };
 
   return (
     <div className="history-page">
@@ -65,8 +81,6 @@ export default function HistoryPage() {
         </div>
 
         {error && <div className="error-banner" role="alert">{error}</div>}
-        {loading && <p className="history-empty">Loading processing history…</p>}
-
         <section className="history-section" aria-labelledby="processing-jobs-title">
           <div className="history-section-heading">
             <div><p className="eyebrow">Image and video</p><h2 id="processing-jobs-title">Processing Jobs</h2></div>
@@ -79,42 +93,24 @@ export default function HistoryPage() {
               </select>
             </div>
           </div>
+          {loading && (
+            <div className="history-loading" role="status" aria-live="polite">
+              <span className="history-loading-spinner" aria-hidden="true" />
+              <span>Loading processing history...</span>
+            </div>
+          )}
           {!loading && jobs.length === 0 ? <p className="history-empty">No processing jobs found.</p> : (
-            <div className="history-job-list">{jobs.map((job) => <JobRow job={job} key={job.id} />)}</div>
+            <div className="history-job-list">{jobs.map((job) => <JobRow job={job} onReviewImage={reviewImage} loading={imageReviewLoading === job.id} key={job.id} />)}</div>
           )}
         </section>
 
-        <section className="history-section" aria-labelledby="risk-snapshots-title">
-          <div className="history-section-heading">
-            <div><p className="eyebrow">Sampled evidence</p><h2 id="risk-snapshots-title">Risk Snapshots</h2></div>
-            <select aria-label="Filter snapshots by risk" value={riskLevel} onChange={(event) => setRiskLevel(event.target.value)}>
-              <option value="">All risks</option><option value="WARNING">Warning</option><option value="DANGER">Danger</option>
-            </select>
-          </div>
-          {!loading && snapshots.length === 0 ? <p className="history-empty">No WARNING or DANGER snapshots found.</p> : (
-            <div className="snapshot-grid">
-              {snapshots.map((snapshot) => (
-                <SnapshotCard
-                  snapshot={snapshot}
-                  onReview={() => setReviewSnapshot(snapshot)}
-                  key={snapshot.id}
-                />
-              ))}
-            </div>
-          )}
-        </section>
       </main>
-      {reviewSnapshot && (
-        <RiskSnapshotReviewModal
-          snapshot={reviewSnapshot}
-          onClose={() => setReviewSnapshot(null)}
-        />
-      )}
+      {imageReview && <ImageEvidenceReviewModal jobName={imageReview.name} views={imageReview.views} onClose={() => setImageReview(null)} />}
     </div>
   );
 }
 
-function JobRow({ job }: { job: ProcessingJobHistory }) {
+function JobRow({ job, onReviewImage, loading }: { job: ProcessingJobHistory; onReviewImage: (job: ProcessingJobHistory) => void; loading: boolean }) {
   const reportAvailable = job.media_type === "video" && job.status === "completed";
   return (
     <article className="history-job-row">
@@ -127,11 +123,20 @@ function JobRow({ job }: { job: ProcessingJobHistory }) {
       <div className="history-report-action">
         {reportAvailable ? (
           <a
-            className="button button-secondary"
+            className="button button-primary history-action-button history-report-button"
             href={`/?report=${encodeURIComponent(job.id)}&from=history`}
           >
-            View report
+            View report <span aria-hidden="true">→</span>
           </a>
+        ) : job.media_type === "image" && job.status === "completed" && job.output_path ? (
+          <button
+            className="button button-secondary history-action-button history-image-button"
+            type="button"
+            disabled={loading}
+            onClick={() => onReviewImage(job)}
+          >
+            {loading ? "Loading..." : "Review image"} <span aria-hidden="true">↗</span>
+          </button>
         ) : (
           <small>{reportStatusLabel(job)}</small>
         )}
@@ -164,37 +169,4 @@ function reportStatusLabel(job: ProcessingJobHistory) {
   if (job.media_type !== "video") return "No video report";
   if (job.status === "queued" || job.status === "processing") return "Report pending";
   return "No report";
-}
-
-function SnapshotCard({
-  snapshot,
-  onReview,
-}: {
-  snapshot: RiskSnapshotHistory;
-  onReview: () => void;
-}) {
-  const preview = apiUrl(snapshot.rgb_evidence_path || snapshot.evidence_path);
-  return (
-    <article className="snapshot-card">
-      {preview ? (
-        <button
-          className="snapshot-preview-button"
-          type="button"
-          aria-label={`Review ${snapshot.risk_level} risk snapshot`}
-          onClick={onReview}
-        >
-          <img src={preview} alt={`${snapshot.risk_level} risk snapshot`} />
-        </button>
-      ) : <div className="snapshot-placeholder">No preview</div>}
-      <div className="snapshot-card-body">
-        <span className={`report-risk risk-${snapshot.risk_level.toLowerCase()}`}>{snapshot.risk_level}</span>
-        <strong>{snapshot.frame_index == null ? "Image assessment" : `Frame ${snapshot.frame_index + 1}`}</strong>
-        <span>{snapshot.timestamp_sec == null ? "No video timestamp" : `${snapshot.timestamp_sec.toFixed(2)}s`} · Job {snapshot.job_id.slice(0, 8)}</span>
-        <small>{snapshot.assessment_reliable ? "Reliable assessment" : "Review recommended"}</small>
-        <button className="button button-secondary" type="button" onClick={onReview}>
-          Review evidence
-        </button>
-      </div>
-    </article>
-  );
 }

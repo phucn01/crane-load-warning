@@ -20,6 +20,8 @@ from annotation_engine import (
     EvidenceTraceability,
     OfflineEvidenceComposer,
     render_image_overlay,
+    render_safe_no_load_overlay,
+    render_skipped_overlay,
 )
 from geometry_engine import (
     GeometryFramePipeline,
@@ -67,7 +69,8 @@ class ProcessedFrame:
 
     annotated_bgr: NDArray[np.uint8]
     pseudo_bev_bgr: NDArray[np.uint8] | None
-    risk_level: RiskLevel
+    risk_level: RiskLevel | None
+    assessment_status: str = "FULL_EVALUATION"
     confidence: float | None = None
     assessment_reliable: bool = False
     quality_reasons: tuple[str, ...] = ()
@@ -181,6 +184,77 @@ class ImageProcessingService:
         # The adapters contain their own safeguards, while this lock also prevents
         # concurrent access to model backends that do not guarantee thread safety.
         with self._processing_lock:
+            detections = self.vision_pipeline.detect(
+                image_bgr, frame_id=context.frame_id
+            )
+            has_person = any(d["class_name"] == "person" for d in detections)
+            has_load = any(d["class_name"] == "hanging_object" for d in detections)
+            if not (has_person and has_load):
+                status = "SAFE_NO_LOAD" if has_person else (
+                    "SKIPPED_NO_PERSON" if has_load else "SKIPPED_NO_REQUIRED_OBJECTS"
+                )
+                annotated = (
+                    render_safe_no_load_overlay(
+                        image_bgr, detections, frame_id=context.frame_id,
+                        frame_local_labels=False,
+                    )
+                    if status == "SAFE_NO_LOAD"
+                    else render_skipped_overlay(
+                        image_bgr, detections, status=status,
+                        frame_id=context.frame_id,
+                    )
+                )
+                run_dir.mkdir(parents=True, exist_ok=True)
+                rgb_path = run_dir / "rgb.png"
+                _write_png(rgb_path, annotated)
+                counts = Counter(item["class_name"] for item in detections)
+                models = self.model_manager.metadata().get("models", {})
+                payload = {
+                    "status": "completed",
+                    "assessment_status": status,
+                    "processing_time_ms": round((perf_counter() - started) * 1000.0, 3),
+                    "assessment": {
+                        "risk_level": "SAFE",
+                        "assessment_reliable": status == "SAFE_NO_LOAD",
+                        "quality_reasons": [status.lower()],
+                        "contributing_person_ids": [],
+                        "contributing_load_ids": [],
+                        "pairs": [],
+                    },
+                    "summary": {
+                        "person_count": counts.get("person", 0),
+                        "load_count": counts.get("hanging_object", 0),
+                        "rope_count": counts.get("hanging_rope", 0) + counts.get("rope", 0),
+                    },
+                    "detections": _detection_payloads(tuple(detections)),
+                    "geometry": {
+                        "coordinate_system": "relative_pseudo_bev_not_metric",
+                        "depth_low": None,
+                        "depth_high": None,
+                        "quality_reasons": [status.lower()],
+                        "persons": [],
+                        "loads": [],
+                    },
+                    "evidence": {
+                        "rgb_url": f"/evidence/{run_id}/rgb.png",
+                        "pseudo_bev_url": None,
+                        "combined_url": f"/evidence/{run_id}/rgb.png",
+                    },
+                    "metadata": {
+                        "pipeline_version": PIPELINE_VERSION,
+                        "frame_id": run_id,
+                        "image_width": int(image_bgr.shape[1]),
+                        "image_height": int(image_bgr.shape[0]),
+                        "depth": None,
+                        "models_loaded": {
+                            str(name): bool(values.get("loaded", False))
+                            for name, values in models.items()
+                            if isinstance(values, Mapping)
+                        },
+                        "config_versions": self.config_versions,
+                    },
+                }
+                return ImageDetectionResponse.model_validate(payload)
             frame = self._run_frame_pipeline(
                 image_bgr,
                 context=context,
@@ -263,11 +337,74 @@ class ImageProcessingService:
         )
         started = perf_counter()
         with self._processing_lock:
+            # Every video frame is detected, but person-only frames do not need
+            # depth/geometry/risk inference.  They are explicit SAFE evidence.
+            detections = self.vision_pipeline.detect(
+                image_bgr, frame_id=context.frame_id
+            )
+            has_person = any(d["class_name"] == "person" for d in detections)
+            has_load = any(d["class_name"] == "hanging_object" for d in detections)
+            if has_person and not has_load:
+                annotated = render_safe_no_load_overlay(
+                    image_bgr,
+                    detections,
+                    frame_id=context.frame_id,
+                    frame_local_labels=True,
+                )
+                result = ProcessedFrame(
+                    annotated_bgr=annotated,
+                    pseudo_bev_bgr=None,
+                    risk_level=RiskLevel.SAFE,
+                    assessment_status="SAFE_NO_LOAD",
+                    confidence=max(
+                        (float(d["confidence"]) for d in detections if d["class_name"] == "person"),
+                        default=None,
+                    ),
+                    assessment_reliable=True,
+                    quality_reasons=("no_hanging_object_detected",),
+                )
+                LOGGER.info(
+                    "=== END | OPERATION=VIDEO_FRAME_PROCESSING | JOB_ID=%s | "
+                    "FRAME_INDEX=%s | DURATION_MS=%.3f | STATUS=SAFE_NO_LOAD ===",
+                    upload_id,
+                    frame_index,
+                    (perf_counter() - started) * 1000.0,
+                )
+                return result
+
+            if not has_person:
+                status = (
+                    "SKIPPED_NO_PERSON"
+                    if has_load
+                    else "SKIPPED_NO_REQUIRED_OBJECTS"
+                )
+                return ProcessedFrame(
+                    annotated_bgr=render_skipped_overlay(
+                        image_bgr,
+                        detections,
+                        status=status,
+                        frame_id=context.frame_id,
+                    ),
+                    pseudo_bev_bgr=None,
+                    risk_level=None,
+                    assessment_status=status,
+                    assessment_reliable=None,
+                    quality_reasons=("person_not_detected",),
+                )
+
+            vision = VisionFrameResult(
+                frame_id=context.frame_id,
+                detections=detections,
+                relative_depth=self.vision_pipeline.estimate_depth(
+                    image_bgr, frame_id=context.frame_id
+                ),
+            )
             frame = self._run_frame_pipeline(
                 image_bgr,
                 context=context,
                 update_temporal_event=False,
                 frame_local_labels=True,
+                vision=vision,
             )
             pseudo_bev = (
                 None
@@ -281,6 +418,7 @@ class ImageProcessingService:
             annotated_bgr=frame.annotated_bgr,
             pseudo_bev_bgr=pseudo_bev,
             risk_level=frame.risk.assessment.level,
+            assessment_status="FULL_EVALUATION",
             confidence=max(
                 (
                     pair.confidence
@@ -308,12 +446,13 @@ class ImageProcessingService:
         context: MediaFrameContext,
         update_temporal_event: bool,
         frame_local_labels: bool,
+        vision: VisionFrameResult | None = None,
     ) -> _FramePipelineResult:
         """Single shared Vision -> Geometry -> Risk -> Annotation path."""
 
         fields = {"frame_id": context.frame_id}
         with log_operation(LOGGER, "vision_pipeline", **fields):
-            vision = self.vision_pipeline.process(
+            vision = vision or self.vision_pipeline.process(
                 image_bgr, frame_id=context.frame_id
             )
         with log_operation(LOGGER, "geometry_pipeline", **fields):

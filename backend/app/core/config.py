@@ -17,6 +17,7 @@ class Settings:
     risk_config: Path
     evidence_root: Path
     max_upload_bytes: int = 20 * 1024 * 1024
+    image_upload_root: Path | None = None
     video_upload_root: Path | None = None
     video_output_root: Path | None = None
     max_video_upload_bytes: int = 500 * 1024 * 1024
@@ -53,6 +54,10 @@ class Settings:
             evidence_root=_environment_path(
                 "CRANE_EVIDENCE_ROOT",
                 PROJECT_ROOT / "backend" / "storage" / "evidence",
+            ),
+            image_upload_root=_environment_path(
+                "CRANE_IMAGE_UPLOAD_ROOT",
+                PROJECT_ROOT / "backend" / "storage" / "uploads" / "images",
             ),
             video_upload_root=_environment_path(
                 "CRANE_VIDEO_UPLOAD_ROOT",

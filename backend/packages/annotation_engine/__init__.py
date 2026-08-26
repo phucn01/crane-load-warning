@@ -6,7 +6,11 @@ from .evidence_composer import (
     build_assessment_payload,
     compose_evidence_image,
 )
-from .image_overlay import render_image_overlay
+from .image_overlay import (
+    render_image_overlay,
+    render_safe_no_load_overlay,
+    render_skipped_overlay,
+)
 from .pseudo_bev_overlay import (
     draw_pseudo_bev_chart,
     render_pseudo_bev_chart,
@@ -23,4 +27,6 @@ __all__ = [
     "render_image_overlay",
     "render_pseudo_bev_chart",
     "render_pseudo_bev_overlay",
+    "render_safe_no_load_overlay",
+    "render_skipped_overlay",
 ]

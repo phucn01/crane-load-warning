@@ -47,7 +47,7 @@ async def detect_image(
     analysis_id: str | None = None
     try:
         with log_operation(LOGGER, "validate_image_upload"):
-            _validate_upload_type(file)
+            suffix = _validate_upload_type(file)
         maximum = request.app.state.settings.max_upload_bytes
         with log_operation(LOGGER, "read_image_upload"):
             payload = await file.read(maximum + 1)
@@ -68,13 +68,32 @@ async def detect_image(
             image_bgr = _decode_supported_image(payload)
         service = request.app.state.image_processing_service
         analysis_id = uuid4().hex
+        input_path: Path = request.app.state.image_upload_root / (
+            f"{analysis_id}{suffix}"
+        )
+        with log_operation(
+            LOGGER, "persist_image_upload", upload_bytes=len(payload)
+        ):
+            try:
+                await run_in_threadpool(_write_image_upload, payload, input_path)
+            except OSError as error:
+                input_path.unlink(missing_ok=True)
+                LOGGER.exception(
+                    "=== ERROR | OPERATION=PERSIST_IMAGE_UPLOAD | "
+                    "ERROR_TYPE=%s ===",
+                    type(error).__name__,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="image upload could not be stored",
+                ) from error
         created_at = datetime.now(UTC)
         history.create_job(
             ProcessingJobRecord(
                 job_id=analysis_id,
                 media_type="image",
                 input_name=Path(file.filename or "image").name,
-                input_path=None,
+                input_path=input_path,
                 output_path=None,
                 status=JobStatus.QUEUED,
                 total_frames=None,
@@ -100,7 +119,11 @@ async def detect_image(
                     run_id=analysis_id,
                 )
             history.complete_image(analysis_id, response)
-            history.persist_image_snapshot(analysis_id, response)
+            history.persist_image_snapshot(
+                analysis_id,
+                response,
+                original_evidence_path=f"/uploads/images/{input_path.name}",
+            )
             return response
         except Exception as error:
             history.fail_job(analysis_id, "image processing failed")
@@ -203,7 +226,7 @@ async def detect_video(
         await file.close()
 
 
-def _validate_upload_type(file: UploadFile) -> None:
+def _validate_upload_type(file: UploadFile) -> str:
     suffix = Path(file.filename or "").suffix.lower()
     content_type = (file.content_type or "").lower()
     if (
@@ -214,6 +237,12 @@ def _validate_upload_type(file: UploadFile) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="only JPG, JPEG, and PNG images are supported",
         )
+    return suffix
+
+
+def _write_image_upload(payload: bytes, destination: Path) -> None:
+    with destination.open("xb") as output:
+        output.write(payload)
 
 
 def _decode_supported_image(payload: bytes) -> np.ndarray:

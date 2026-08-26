@@ -42,14 +42,15 @@ class RiskSnapshotRecord:
     job_id: str
     frame_index: int | None
     timestamp_sec: float | None
-    risk_level: Literal["WARNING", "DANGER"]
+    risk_level: RiskLevelValue | None
     confidence: float | None
-    assessment_reliable: bool
+    assessment_reliable: bool | None
     quality_reasons: tuple[str, ...]
     evidence_path: str | None
     rgb_evidence_path: str | None
     pseudo_bev_path: str | None
     created_at: datetime
+    assessment_status: str = "FULL_EVALUATION"
 
 
 __all__ = [

@@ -43,7 +43,7 @@ class FrameEvidenceResponse(StrictSchema):
 class FrameRiskResultResponse(StrictSchema):
     frame_number: int = Field(ge=1)
     timestamp_seconds: float = Field(ge=0.0)
-    risk_level: RiskLevelValue
+    risk_level: RiskLevelValue | None
 
 
 class FrameRiskResultsResponse(StrictSchema):

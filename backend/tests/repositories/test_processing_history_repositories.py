@@ -49,7 +49,11 @@ def _job(
         job_id=uuid4().hex,
         media_type=media_type,  # type: ignore[arg-type]
         input_name="crane.mp4" if media_type == "video" else "crane.png",
-        input_path=Path("storage/input") if media_type == "video" else None,
+        input_path=(
+            Path("storage/input")
+            if media_type == "video"
+            else Path("storage/uploads/images/crane.png")
+        ),
         output_path=Path("storage/output") if media_type == "video" else None,
         status=status,
         total_frames=None,

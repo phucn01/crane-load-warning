@@ -59,6 +59,46 @@ class VisionFramePipeline:
             image_path=image_path,
         )
 
+    def detect(
+        self,
+        image_bgr: NDArray[np.generic],
+        *,
+        frame_id: str,
+    ) -> tuple[Detection, ...]:
+        """Run the object detectors without the depth model.
+
+        Video processing can use this inexpensive first pass to identify frames
+        that only contain a person.  Those frames are SAFE_NO_LOAD and do not
+        need geometry/depth inference.
+        """
+        if not frame_id:
+            raise ValueError("frame_id must not be empty")
+        _validate_image(image_bgr)
+        with log_pipeline_operation("vision", "prepare_detectors", frame_id=frame_id):
+            load_detector = self.model_manager.get("rfdetr")
+            person_segmenter = self.model_manager.get("yolo_person")
+        with log_pipeline_operation("vision", "rfdetr_inference", frame_id=frame_id):
+            load_detections = load_detector.predict(image_bgr)
+        with log_pipeline_operation("vision", "yolo_person_inference", frame_id=frame_id):
+            person_detections = person_segmenter.predict(image_bgr)
+        return tuple(load_detections + person_detections)
+
+    def estimate_depth(
+        self,
+        image_bgr: NDArray[np.generic],
+        *,
+        frame_id: str,
+        image_path: str | Path | None = None,
+    ):
+        """Run depth inference separately so callers can skip it when unused."""
+        if not frame_id:
+            raise ValueError("frame_id must not be empty")
+        _validate_image(image_bgr)
+        with log_pipeline_operation("vision", "depth_inference", frame_id=frame_id):
+            return self.model_manager.get("depth_anything_v3").predict(
+                image_bgr, image_path=image_path
+            )
+
     def _process(
         self,
         image_bgr: NDArray[np.generic],
@@ -69,31 +109,13 @@ class VisionFramePipeline:
         if not frame_id:
             raise ValueError("frame_id must not be empty")
         _validate_image(image_bgr)
-        with log_pipeline_operation(
-            "vision", "prepare_models", frame_id=frame_id
-        ):
-            load_detector = self.model_manager.get("rfdetr")
-            person_segmenter = self.model_manager.get("yolo_person")
-            depth_estimator = self.model_manager.get("depth_anything_v3")
-
-        with log_pipeline_operation(
-            "vision", "rfdetr_inference", frame_id=frame_id
-        ):
-            load_detections = load_detector.predict(image_bgr)
-        with log_pipeline_operation(
-            "vision", "yolo_person_inference", frame_id=frame_id
-        ):
-            person_detections = person_segmenter.predict(image_bgr)
-        with log_pipeline_operation(
-            "vision", "depth_inference", frame_id=frame_id
-        ):
-            relative_depth = depth_estimator.predict(
-                image_bgr,
-                image_path=image_path,
-            )
+        detections = self.detect(image_bgr, frame_id=frame_id)
+        relative_depth = self.estimate_depth(
+            image_bgr, frame_id=frame_id, image_path=image_path
+        )
         return VisionFrameResult(
             frame_id=frame_id,
-            detections=tuple(load_detections + person_detections),
+            detections=detections,
             relative_depth=relative_depth,
         )
 

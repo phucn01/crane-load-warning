@@ -188,10 +188,21 @@ class ProcessingHistoryService:
     def persist_snapshot(self, record: RiskSnapshotRecord) -> bool:
         return self._write("persist_risk_snapshot", self.snapshots.create, record)
 
+    def persist_snapshots(self, records: list[RiskSnapshotRecord]) -> bool:
+        if not records:
+            return True
+        return self._write(
+            "persist_risk_snapshot_batch",
+            self.snapshots.create_many,
+            tuple(records),
+        )
+
     def persist_image_snapshot(
         self,
         job_id: str,
         response: ImageDetectionResponse,
+        *,
+        original_evidence_path: str | None = None,
     ) -> bool:
         level = response.assessment.risk_level
         if not self.should_capture_snapshot(
@@ -211,10 +222,11 @@ class ProcessingHistoryService:
                 frame_index=None,
                 timestamp_sec=None,
                 risk_level=level,  # type: ignore[arg-type]
+                assessment_status="FULL_EVALUATION",
                 confidence=confidence,
                 assessment_reliable=response.assessment.assessment_reliable,
                 quality_reasons=tuple(response.assessment.quality_reasons),
-                evidence_path=response.evidence.combined_url,
+                evidence_path=original_evidence_path,
                 rgb_evidence_path=response.evidence.rgb_url,
                 pseudo_bev_path=response.evidence.pseudo_bev_url,
                 created_at=datetime.now(UTC),

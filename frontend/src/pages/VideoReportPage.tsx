@@ -4,8 +4,8 @@ import RiskTimeline from "../components/RiskTimeline";
 import VideoFrameEvidenceModal from "../components/VideoFrameEvidenceModal";
 import {
   apiUrl,
-  getAllRiskSnapshotsForJob,
   getAllVideoFrameResults,
+  getRiskSnapshotHistory,
   getVideoReport,
 } from "../services/api";
 import type {
@@ -18,10 +18,15 @@ import type {
   VideoReportSegment,
 } from "../types/detection";
 
+const REPORT_SNAPSHOT_PAGE_SIZE = 12;
+
 export default function VideoReportPage({ jobId }: { jobId: string }) {
   const [report, setReport] = useState<VideoReport | null>(null);
   const [frameResults, setFrameResults] = useState<VideoFrameRiskResult[]>([]);
   const [riskSnapshots, setRiskSnapshots] = useState<RiskSnapshotHistory[]>([]);
+  const [snapshotTotal, setSnapshotTotal] = useState(0);
+  const [snapshotPage, setSnapshotPage] = useState(0);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [selectedSnapshotId, setSelectedSnapshotId] = useState<string | null>(null);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [selectedEvidenceFrame, setSelectedEvidenceFrame] = useState<number | null>(null);
@@ -44,22 +49,12 @@ export default function VideoReportPage({ jobId }: { jobId: string }) {
           if (reason instanceof DOMException && reason.name === "AbortError") throw reason;
           return { frames: [], unavailable: true };
         }),
-      getAllRiskSnapshotsForJob(jobId, controller.signal)
-        .then((snapshots) => ({ snapshots, unavailable: false }))
-        .catch((reason: unknown) => {
-          if (reason instanceof DOMException && reason.name === "AbortError") throw reason;
-          return { snapshots: [], unavailable: true };
-        }),
     ])
-      .then(([reportPayload, timeline, persistedSnapshots]) => {
+      .then(([reportPayload, timeline]) => {
         if (!active) return;
         setReport(reportPayload);
         setFrameResults(timeline.frames);
         setFrameTimelineUnavailable(timeline.unavailable);
-        setRiskSnapshots([...persistedSnapshots.snapshots].sort(
-          (left, right) => (left.timestamp_sec ?? 0) - (right.timestamp_sec ?? 0),
-        ));
-        setSnapshotsUnavailable(persistedSnapshots.unavailable);
         const initialSegment = reportPayload.risk_segments.find(
           (segment) => segment.max_risk_level === "DANGER",
         ) ?? reportPayload.risk_segments[0];
@@ -75,6 +70,40 @@ export default function VideoReportPage({ jobId }: { jobId: string }) {
       controller.abort();
     };
   }, [jobId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    setSnapshotLoading(true);
+    setSnapshotsUnavailable(false);
+    getRiskSnapshotHistory(
+      { jobId, limit: REPORT_SNAPSHOT_PAGE_SIZE, offset: snapshotPage * REPORT_SNAPSHOT_PAGE_SIZE, order: "frame_asc" },
+      controller.signal,
+    )
+      .then((page) => {
+        if (!active) return;
+        setRiskSnapshots([...page.items].sort(
+          (left, right) => (left.timestamp_sec ?? 0) - (right.timestamp_sec ?? 0),
+        ));
+        setSnapshotTotal(page.total);
+        // Keep the review panel closed until the user explicitly reviews a card.
+        // This avoids showing the first frame twice (once in review and once in the list).
+        setSelectedSnapshotId(null);
+      })
+      .catch((reason: unknown) => {
+        if (!active || (reason instanceof DOMException && reason.name === "AbortError")) return;
+        setRiskSnapshots([]);
+        setSnapshotTotal(0);
+        setSnapshotsUnavailable(true);
+      })
+      .finally(() => {
+        if (active) setSnapshotLoading(false);
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [jobId, snapshotPage]);
 
   const selectedSegment = report?.risk_segments.find(
     (segment) => segment.segment_id === selectedSegmentId,
@@ -221,20 +250,44 @@ export default function VideoReportPage({ jobId }: { jobId: string }) {
           />
         </section>
 
+        {selectedSnapshot && (
+          <section className="report-section" aria-labelledby="report-frame-review-title">
+            <div className="report-section-heading">
+              <div>
+                <p className="eyebrow">Frame review</p>
+                <h2 id="report-frame-review-title">
+                  {selectedSnapshot.frame_index == null
+                    ? "Image assessment"
+                    : `Frame ${selectedSnapshot.frame_index + 1}`}
+                </h2>
+              </div>
+              <span>{selectedSnapshot.assessment_status ?? "FULL_EVALUATION"}</span>
+            </div>
+            <SnapshotEvidencePanel
+              snapshot={selectedSnapshot}
+              evidence={selectedSnapshotEvidence}
+              onOpen={(item) => setModalEvidence([item])}
+            />
+          </section>
+        )}
+
         <section className="report-section" aria-labelledby="report-snapshots-title">
           <div className="report-section-heading">
             <div>
-              <p className="eyebrow">Persisted cooldown sampling</p>
+              <p className="eyebrow">Persisted frame evidence</p>
               <h2 id="report-snapshots-title">Risk snapshots</h2>
             </div>
-            <span>{riskSnapshots.length} snapshots</span>
+            <span>{riskSnapshots.length}{snapshotTotal > riskSnapshots.length ? ` of ${snapshotTotal}` : ""} snapshots</span>
           </div>
           <p className="report-section-note">
-            These are the same sampled WARNING / DANGER frames shown in History.
-            Segment evidence below keeps only first, peak, and last key frames, so
-            its count can be smaller when roles overlap.
+            These are persisted frame assessments for this video, with image evidence available for review.
           </p>
-          {snapshotsUnavailable ? (
+          {snapshotLoading ? (
+            <div className="report-snapshot-loading" role="status" aria-live="polite">
+              <span className="report-loading-spinner" aria-hidden="true" />
+              <span>Loading risk snapshots...</span>
+            </div>
+          ) : snapshotsUnavailable ? (
             <p className="report-warning">Persisted risk snapshots could not be loaded.</p>
           ) : riskSnapshots.length === 0 ? (
             <p className="report-empty">No persisted risk snapshots are available for this video.</p>
@@ -250,27 +303,50 @@ export default function VideoReportPage({ jobId }: { jobId: string }) {
               ))}
             </div>
           )}
+          {!snapshotsUnavailable && snapshotTotal > REPORT_SNAPSHOT_PAGE_SIZE && (
+            <div className="history-pagination" aria-label="Report risk snapshot pages">
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={snapshotLoading || snapshotPage === 0}
+                onClick={() => setSnapshotPage((page) => Math.max(0, page - 1))}
+              >
+                Previous
+              </button>
+              <span aria-live="polite">
+                {snapshotLoading ? "Loading snapshots..." : `Page ${snapshotPage + 1} of ${Math.ceil(snapshotTotal / REPORT_SNAPSHOT_PAGE_SIZE)}`}
+              </span>
+              <button
+                className="button button-secondary"
+                type="button"
+                disabled={snapshotLoading || (snapshotPage + 1) * REPORT_SNAPSHOT_PAGE_SIZE >= snapshotTotal}
+                onClick={() => setSnapshotPage((page) => page + 1)}
+              >
+                {snapshotLoading ? "Loading..." : "Next"}
+              </button>
+            </div>
+          )}
         </section>
 
-        <section className="report-section">
+        {false && (<section className="report-section">
           <div className="report-section-heading">
             <div>
               <p className="eyebrow">{selectedSnapshot ? "Frame review" : "Risk review"}</p>
               <h2>
                 {selectedSnapshot?.frame_index == null
                   ? "WARNING / DANGER segments"
-                  : `Snapshot frame ${selectedSnapshot.frame_index + 1}`}
+                  : `Snapshot frame ${selectedSnapshot!.frame_index! + 1}`}
               </h2>
             </div>
-            <span>{report.risk_segments.length} segments</span>
+            <span>{report!.risk_segments.length} segments</span>
           </div>
 
-          {report.risk_segments.length === 0 && !selectedSnapshot ? (
+          {report!.risk_segments.length === 0 && !selectedSnapshot ? (
             <p className="report-empty">No WARNING or DANGER segments were detected.</p>
           ) : (
             <div className="report-segment-layout">
               <div className="report-segments" aria-label="Risk segment review queue">
-                {report.risk_segments.map((segment, index) => (
+                {report!.risk_segments.map((segment, index) => (
                   <ReportSegmentCard
                     segment={segment}
                     index={index}
@@ -283,7 +359,7 @@ export default function VideoReportPage({ jobId }: { jobId: string }) {
               </div>
               {selectedSnapshot ? (
                 <SnapshotEvidencePanel
-                  snapshot={selectedSnapshot}
+                  snapshot={selectedSnapshot!}
                   evidence={selectedSnapshotEvidence}
                   onOpen={(item) => setModalEvidence([item])}
                 />
@@ -297,7 +373,7 @@ export default function VideoReportPage({ jobId }: { jobId: string }) {
               )}
             </div>
           )}
-        </section>
+        </section>)}
 
         <section className="report-methodology">
           <div>
@@ -306,8 +382,7 @@ export default function VideoReportPage({ jobId }: { jobId: string }) {
           </div>
           <ul>
             <li>SAFE, WARNING, and DANGER totals count independently assessed frames, not tracked events.</li>
-            <li>Risk snapshots use cooldown sampling; segment evidence contains first, peak, and last key frames.</li>
-            <li>Saved clips include pre-roll and post-roll context outside the true risk range.</li>
+            <li>Risk snapshots use cooldown sampling and are frame observations, not tracked events.</li>
             <li>Pseudo-BEV uses relative depth and is not a metric distance measurement.</li>
             <li>Person and load identities are not tracked consistently across video frames.</li>
           </ul>
@@ -420,8 +495,8 @@ function ReportSnapshotCard({
         <div className="snapshot-placeholder">No preview</div>
       )}
       <div>
-        <span className={`report-risk risk-${snapshot.risk_level.toLowerCase()}`}>
-          {snapshot.risk_level}
+            <span className={`report-risk risk-${(snapshot.risk_level ?? "SAFE").toLowerCase()}`}>
+              {snapshot.assessment_status === "SAFE_NO_LOAD" ? "SAFE · NO LOAD" : snapshot.risk_level ?? snapshot.assessment_status ?? "SKIPPED"}
         </span>
         <strong>{frameNumber == null ? "Image assessment" : `Frame ${frameNumber}`}</strong>
         <small>{snapshot.timestamp_sec == null ? "No timestamp" : `${snapshot.timestamp_sec.toFixed(2)}s`}</small>
@@ -578,19 +653,22 @@ function mergeTimelineEvidence(
     byFrame.set(item.frame_number, item);
   }
   for (const snapshot of snapshots) {
-    if (snapshot.frame_index == null || snapshot.timestamp_sec == null) continue;
-    const originalUrl = snapshot.evidence_path;
-    const rgbUrl = snapshot.rgb_evidence_path;
-    const pseudoBevUrl = snapshot.pseudo_bev_path;
-    if (!originalUrl || !rgbUrl || !pseudoBevUrl) continue;
+    if (
+      snapshot.frame_index == null
+      || snapshot.timestamp_sec == null
+      || snapshot.risk_level == null
+      || snapshot.risk_level === "SAFE"
+    ) continue;
     const frameNumber = snapshot.frame_index + 1;
     byFrame.set(frameNumber, {
       frame_number: frameNumber,
       timestamp_seconds: snapshot.timestamp_sec,
       risk_level: snapshot.risk_level,
-      original_url: originalUrl,
-      rgb_url: rgbUrl,
-      pseudo_bev_url: pseudoBevUrl,
+      // Timeline markers only need frame/time/risk. Evidence URLs remain
+      // optional because not every persisted assessment has image files.
+      original_url: snapshot.evidence_path ?? "",
+      rgb_url: snapshot.rgb_evidence_path ?? "",
+      pseudo_bev_url: snapshot.pseudo_bev_path ?? "",
     });
   }
   return [...byFrame.values()].sort((left, right) => left.frame_number - right.frame_number);
@@ -603,6 +681,8 @@ function snapshotToEvidence(snapshot: RiskSnapshotHistory): VideoFrameEvidence |
     || !snapshot.evidence_path
     || !snapshot.rgb_evidence_path
     || !snapshot.pseudo_bev_path
+    || snapshot.risk_level == null
+    || snapshot.risk_level === "SAFE"
   ) {
     return null;
   }

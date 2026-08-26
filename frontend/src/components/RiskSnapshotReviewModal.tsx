@@ -14,6 +14,8 @@ export default function RiskSnapshotReviewModal({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const frameNumber = snapshot.frame_index == null ? null : snapshot.frame_index + 1;
+  const level = snapshot.risk_level ?? "SAFE";
+  const status = snapshot.assessment_status ?? level;
 
   useEffect(() => {
     returnFocusRef.current = document.activeElement instanceof HTMLElement
@@ -64,8 +66,8 @@ export default function RiskSnapshotReviewModal({
             </p>
           </div>
           <div className="frame-evidence-header-actions">
-            <span className={`frame-evidence-risk risk-${snapshot.risk_level.toLowerCase()}`}>
-              {snapshot.risk_level}
+            <span className={`frame-evidence-risk risk-${level.toLowerCase()}`}>
+              {status === "SAFE_NO_LOAD" ? "SAFE · NO LOAD" : status.replaceAll("_", " ")}
             </span>
             <button
               ref={closeButtonRef}
@@ -100,8 +102,9 @@ export default function RiskSnapshotReviewModal({
 
         <footer className="frame-evidence-footer">
           <p id="snapshot-review-description">
-            Pseudo-BEV is relative and non-metric. This is sampled frame evidence,
-            not a tracked safety event.
+            {snapshot.pseudo_bev_path
+              ? "Pseudo-BEV is relative and non-metric. This is frame evidence, not a tracked safety event."
+              : "This frame was not fully evaluated because the required person/load objects were unavailable."}
           </p>
         </footer>
       </div>

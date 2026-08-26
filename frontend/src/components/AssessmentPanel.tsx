@@ -11,12 +11,13 @@ function readableReason(reason: string): string {
 
 export default function AssessmentPanel({ result }: AssessmentPanelProps) {
   const { assessment, summary } = result;
+  const status = result.assessment_status ?? "FULL_EVALUATION";
 
   return (
     <section className="assessment-card" aria-labelledby="assessment-title">
       <div className="assessment-heading">
         <div>
-          <p className="eyebrow">Immediate assessment</p>
+          <p className="eyebrow">{status === "FULL_EVALUATION" ? "Immediate assessment" : status.replaceAll("_", " ")}</p>
           <h2 id="assessment-title">Scene safety result</h2>
         </div>
         <RiskBadge level={assessment.risk_level} />

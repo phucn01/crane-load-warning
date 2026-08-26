@@ -12,7 +12,7 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000";
 
 export const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
-).replace(/\/$/, "");
+).replace(/\/+$/, "");
 
 interface ErrorPayload {
   detail?: string | Array<{ msg?: string }>;
@@ -62,8 +62,17 @@ export async function analyzeImage(
 
 export function evidenceUrl(path: string | null): string | null {
   if (!path) return null;
-  if (/^https?:\/\//i.test(path)) return path;
-  return `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      const url = new URL(path);
+      url.pathname = `/${url.pathname.replaceAll("\\", "/").replace(/^\/+/, "")}`;
+      return url.toString();
+    } catch {
+      return path;
+    }
+  }
+  const normalizedPath = `/${path.replaceAll("\\", "/").replace(/^\/+/, "")}`;
+  return `${API_BASE_URL}${normalizedPath}`;
 }
 
 export const apiUrl = evidenceUrl;
@@ -132,6 +141,23 @@ export async function getVideoReport(
   );
 }
 
+export interface ImageEvidenceViews {
+  original_url: string | null;
+  detection_url: string | null;
+  bev_url: string | null;
+  combined_url: string | null;
+}
+
+export async function getImageEvidence(
+  jobId: string,
+  signal?: AbortSignal,
+): Promise<ImageEvidenceViews> {
+  return requestJson<ImageEvidenceViews>(
+    `/api/v1/jobs/${encodeURIComponent(jobId)}/image-evidence`,
+    { signal },
+  );
+}
+
 export async function getProcessingHistory(
   filters: { status?: string; mediaType?: string } = {},
   signal?: AbortSignal,
@@ -148,6 +174,7 @@ export async function getRiskSnapshotHistory(
     jobId?: string;
     limit?: number;
     offset?: number;
+    order?: "created_desc" | "frame_asc";
   } = {},
   signal?: AbortSignal,
 ): Promise<RiskSnapshotHistoryPage> {
@@ -157,6 +184,7 @@ export async function getRiskSnapshotHistory(
   });
   if (filters.riskLevel) query.set("risk_level", filters.riskLevel);
   if (filters.jobId) query.set("job_id", filters.jobId);
+  if (filters.order) query.set("order", filters.order);
   return requestJson<RiskSnapshotHistoryPage>(
     `/api/v1/risk-snapshots?${query}`,
     { signal },

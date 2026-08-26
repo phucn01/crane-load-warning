@@ -1,5 +1,5 @@
 """Persistence-only SQLAlchemy models."""
 
-from .processing_history import ProcessingJobRow, RiskSnapshotRow
+from .processing_history import FrameAssessmentRow, ProcessingJobRow, RiskSnapshotRow
 
-__all__ = ["ProcessingJobRow", "RiskSnapshotRow"]
+__all__ = ["FrameAssessmentRow", "ProcessingJobRow", "RiskSnapshotRow"]

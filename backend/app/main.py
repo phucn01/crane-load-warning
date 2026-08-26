@@ -56,6 +56,9 @@ def create_app(
     resolved_settings = settings or Settings.from_environment()
     repository = video_job_repository or VideoJobRepository()
     history_service = _processing_history_service(resolved_settings)
+    image_upload_root = resolved_settings.image_upload_root or (
+        resolved_settings.evidence_root.parent / "uploads" / "images"
+    )
     upload_root = resolved_settings.video_upload_root or (
         resolved_settings.evidence_root.parent / "uploads" / "videos"
     )
@@ -73,8 +76,10 @@ def create_app(
         application.state.image_processing_service = service
         application.state.video_job_repository = repository
         application.state.processing_history_service = history_service
+        application.state.image_upload_root = image_upload_root
         application.state.video_upload_root = upload_root
         application.state.video_output_root = output_root
+        image_upload_root.mkdir(parents=True, exist_ok=True)
         upload_root.mkdir(parents=True, exist_ok=True)
         output_root.mkdir(parents=True, exist_ok=True)
         worker = video_worker or VideoWorker(
@@ -176,6 +181,11 @@ def create_app(
         "/evidence",
         StaticFiles(directory=resolved_settings.evidence_root, check_dir=False),
         name="evidence",
+    )
+    application.mount(
+        "/uploads/images",
+        StaticFiles(directory=image_upload_root, check_dir=False),
+        name="image-uploads",
     )
     return application
 

@@ -55,8 +55,8 @@ export interface LoadGeometry {
 
 export interface GeometryResponse {
   coordinate_system: "relative_pseudo_bev_not_metric";
-  depth_low: number;
-  depth_high: number;
+  depth_low: number | null;
+  depth_high: number | null;
   quality_reasons: string[];
   persons: PersonGeometry[];
   loads: LoadGeometry[];
@@ -108,7 +108,7 @@ export interface ProcessingMetadata {
   frame_id: string;
   image_width: number;
   image_height: number;
-  depth: DepthMetadata;
+  depth: DepthMetadata | null;
   models_loaded: Record<string, boolean>;
   config_versions: Record<string, string>;
 }
@@ -116,6 +116,7 @@ export interface ProcessingMetadata {
 export interface ImageDetectionResponse {
   status: "completed";
   processing_time_ms: number;
+  assessment_status?: string;
   assessment: AssessmentResponse;
   summary: DetectionSummary;
   detections: DetectionItem[];
@@ -157,9 +158,10 @@ export interface RiskSnapshotHistory {
   job_id: string;
   frame_index: number | null;
   timestamp_sec: number | null;
-  risk_level: "WARNING" | "DANGER";
+  risk_level: RiskLevel | null;
+  assessment_status?: string;
   confidence: number | null;
-  assessment_reliable: boolean;
+  assessment_reliable: boolean | null;
   quality_reasons: string[];
   evidence_path: string | null;
   rgb_evidence_path: string | null;
@@ -188,7 +190,8 @@ export interface VideoJobCreated {
 export interface VideoFrameRiskResult {
   frame_number: number;
   timestamp_seconds: number;
-  risk_level: RiskLevel;
+  risk_level: RiskLevel | null;
+  assessment_status?: string;
 }
 
 export interface VideoFrameRiskResultsPage {

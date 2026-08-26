@@ -85,6 +85,7 @@ export default function VideoResult({ job, frameResults }: Props) {
         onSeek={seekVideo}
       />
 
+      {false && (<>
       <div className="risk-segments-heading">
         <div>
           <p className="eyebrow">Review queue</p>
@@ -171,6 +172,7 @@ export default function VideoResult({ job, frameResults }: Props) {
       <p className="segment-disclaimer">
         Colored timeline ranges are independent frame classifications. Saved clips include dimmed context padding and are not tracked safety events.
       </p>
+      </>)}
       {selectedEvidence && (
         <VideoFrameEvidenceModal
           evidence={selectedEvidence}

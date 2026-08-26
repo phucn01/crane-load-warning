@@ -161,6 +161,31 @@ def get_result(
     )
 
 
+@router.get("/{job_id}/image-evidence")
+def get_image_evidence(
+    job_id: str,
+    history: ProcessingHistoryServiceDep,
+) -> dict[str, str | None]:
+    """Return all review views for a persisted image job."""
+    job = history.jobs.get(job_id)
+    if job is None or job.media_type != "image":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="image job was not found")
+    if job.status is not JobStatus.COMPLETED or job.output_path is None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="image evidence is not ready")
+    output = str(job.output_path).replace("\\", "/")
+    if not output.lstrip("/").startswith("evidence/"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="image evidence was not found")
+    output = "/" + output.lstrip("/")
+    evidence_root = output.rsplit("/", 1)[0]
+    input_name = job.input_path.name if job.input_path is not None else None
+    return {
+        "original_url": None if input_name is None else f"/uploads/images/{input_name}",
+        "detection_url": f"{evidence_root}/rgb.png",
+        "bev_url": f"{evidence_root}/pseudo_bev.png",
+        "combined_url": output,
+    }
+
+
 @router.get("/{job_id}/report")
 def get_report(
     job_id: str,
@@ -512,12 +537,19 @@ def _job_response(job: VideoJob) -> VideoJobResponse:
 def _history_job_response(
     job: ProcessingJobRecord,
 ) -> ProcessingJobHistoryResponse:
+    output_path = None if job.output_path is None else str(job.output_path)
+    # Image evidence is exposed as a URL path. Normalize legacy records that
+    # may have been stored with multiple leading slashes.
+    if output_path:
+        public_path = output_path.replace("\\", "/")
+        if public_path.lstrip("/").startswith("evidence/"):
+            output_path = "/" + public_path.lstrip("/")
     return ProcessingJobHistoryResponse(
         id=job.job_id,
         media_type=job.media_type,
         input_name=job.input_name,
         input_path=None if job.input_path is None else str(job.input_path),
-        output_path=None if job.output_path is None else str(job.output_path),
+        output_path=output_path,
         status=job.status.value,
         total_frames=job.total_frames,
         processed_frames=job.processed_frames,

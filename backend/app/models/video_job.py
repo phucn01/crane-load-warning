@@ -35,7 +35,8 @@ class FrameRiskResult:
 
     frame_number: int
     timestamp_seconds: float
-    risk_level: RiskLevelValue
+    risk_level: RiskLevelValue | None
+    assessment_status: str = "FULL_EVALUATION"
 
 
 @dataclass(frozen=True, slots=True)

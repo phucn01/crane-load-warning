@@ -67,6 +67,63 @@ def render_image_overlay(
     return output
 
 
+def render_safe_no_load_overlay(
+    image_bgr: NDArray[np.generic],
+    detections: Iterable[Detection],
+    *,
+    frame_id: str = "safe_no_load",
+    frame_local_labels: bool = True,
+) -> NDArray[np.uint8]:
+    """Render a person-only frame as explicit SAFE evidence.
+
+    This path intentionally does not create a synthetic risk assessment: no
+    hanging load means there is no person/load pair to evaluate.
+    """
+    with log_pipeline_operation("annotation", "render_safe_no_load", frame_id=frame_id):
+        output = _uint8_bgr_image(image_bgr)
+        counters: defaultdict[str, int] = defaultdict(int)
+        for detection in detections:
+            class_name = detection["class_name"]
+            counters[class_name] += 1
+            entity_id = (
+                f"{class_name} {counters[class_name]}"
+                if frame_local_labels
+                else f"{class_name}_{counters[class_name]:02d}"
+            )
+            _draw_detection(
+                output,
+                detection,
+                entity_id=entity_id,
+                level=RiskLevel.SAFE if class_name == "person" else None,
+            )
+        _draw_status_banner(output, "FRAME SAFE | NO LOAD DETECTED", RiskLevel.SAFE)
+        return output
+
+
+def render_skipped_overlay(
+    image_bgr: NDArray[np.generic],
+    detections: Iterable[Detection],
+    *,
+    status: str,
+    frame_id: str = "skipped",
+) -> NDArray[np.uint8]:
+    """Render detections for a frame that cannot be risk-assessed."""
+    with log_pipeline_operation("annotation", "render_skipped", frame_id=frame_id):
+        output = _uint8_bgr_image(image_bgr)
+        counters: defaultdict[str, int] = defaultdict(int)
+        for detection in detections:
+            class_name = detection["class_name"]
+            counters[class_name] += 1
+            _draw_detection(
+                output,
+                detection,
+                entity_id=f"{class_name} {counters[class_name]}",
+                level=None,
+            )
+        _draw_status_banner(output, f"FRAME {status}", RiskLevel.SAFE)
+        return output
+
+
 def _draw_detection(
     output: NDArray[np.uint8],
     detection: Detection,
@@ -118,6 +175,24 @@ def _draw_frame_banner(
     cv2.rectangle(output, (0, 0), (output.shape[1], banner_height), color, -1)
     reliability = "reliable" if assessment.assessment_reliable else "unreliable"
     text = f"FRAME {assessment.level.value} | {reliability}"
+    cv2.putText(
+        output,
+        text,
+        (7, min(21, banner_height - 4)),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.52,
+        (255, 255, 255),
+        1,
+        cv2.LINE_AA,
+    )
+
+
+def _draw_status_banner(
+    output: NDArray[np.uint8], text: str, level: RiskLevel
+) -> None:
+    color = RISK_COLORS_BGR[level]
+    banner_height = min(30, output.shape[0])
+    cv2.rectangle(output, (0, 0), (output.shape[1], banner_height), color, -1)
     cv2.putText(
         output,
         text,
@@ -186,4 +261,6 @@ __all__ = [
     "CLASS_COLORS_BGR",
     "RISK_COLORS_BGR",
     "render_image_overlay",
+    "render_safe_no_load_overlay",
+    "render_skipped_overlay",
 ]

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
@@ -61,9 +61,7 @@ class _ActiveRiskSegment:
     warning_frame_count: int = 0
     danger_frame_count: int = 0
     safe_tail_frames: int = 0
-    first_evidence: _EvidenceCandidate | None = None
-    peak_evidence: _EvidenceCandidate | None = None
-    last_evidence: _EvidenceCandidate | None = None
+    evidence: list[_EvidenceCandidate] = field(default_factory=list)
 
 
 class _RiskSegmentRecorder:
@@ -98,10 +96,10 @@ class _RiskSegmentRecorder:
         annotated: NDArray[np.uint8],
         pseudo_bev: NDArray[np.uint8] | None,
         preview_jpeg: bytes,
-        risk_level: RiskLevelValue,
+        risk_level: RiskLevelValue | None,
     ) -> RiskSegment | None:
         finalized = None
-        if self._active is None and risk_level != "SAFE":
+        if self._active is None and risk_level not in (None, "SAFE"):
             self._start(
                 frame_number,
                 original,
@@ -119,7 +117,7 @@ class _RiskSegmentRecorder:
                     self._active.safe_tail_frames += 1
                     if self._active.safe_tail_frames >= self.post_roll_frames:
                         finalized = self._finalize()
-                else:
+                elif risk_level is not None:
                     self._record_risk_frame(frame_number, risk_level)
                     self._record_evidence(
                         frame_number,
@@ -241,16 +239,7 @@ class _RiskSegmentRecorder:
             annotated=annotated.copy(),
             pseudo_bev=pseudo_bev.copy(),
         )
-        if self._active.first_evidence is None:
-            self._active.first_evidence = candidate
-            self._active.peak_evidence = candidate
-        elif (
-            self._active.peak_evidence is None
-            or RISK_SEVERITY[risk_level]
-            > RISK_SEVERITY[self._active.peak_evidence.risk_level]
-        ):
-            self._active.peak_evidence = candidate
-        self._active.last_evidence = candidate
+        self._active.evidence.append(candidate)
 
     def _finalize(self) -> RiskSegment:
         assert self._active is not None
@@ -290,15 +279,20 @@ class _RiskSegmentRecorder:
         self,
         active: _ActiveRiskSegment,
     ) -> tuple[FrameEvidence, ...]:
-        candidates_by_frame = {
-            candidate.frame_number: candidate
-            for candidate in (
-                active.first_evidence,
-                active.peak_evidence,
-                active.last_evidence,
-            )
-            if candidate is not None
-        }
+        # Keep a compact, deterministic representative set without storing
+        # first/peak/last state on the active segment itself.
+        candidates = active.evidence
+        selected: list[_EvidenceCandidate] = []
+        if candidates:
+            selected.append(candidates[0])
+            peak = max(candidates, key=lambda item: RISK_SEVERITY[item.risk_level])
+            if peak.frame_number != selected[0].frame_number:
+                selected.append(peak)
+            if candidates[-1].frame_number not in {
+                item.frame_number for item in selected
+            }:
+                selected.append(candidates[-1])
+        candidates_by_frame = {candidate.frame_number: candidate for candidate in selected}
         evidence_dir = self.output_root / f"{active.segment_id}_evidence"
         evidence_dir.mkdir(parents=True, exist_ok=False)
         written_paths: list[Path] = []
@@ -450,6 +444,7 @@ class VideoProcessingService:
             counts = {"SAFE": 0, "WARNING": 0, "DANGER": 0}
             max_risk: str | None = None
             processed = 0
+            pending_snapshots: list[RiskSnapshotRecord] = []
 
             while True:
                 frame_started = perf_counter()
@@ -478,7 +473,11 @@ class VideoProcessingService:
                 preview = _encode_preview(annotated)
                 self.repository.set_preview(job_id, processed, preview)
 
-                risk = assessed.risk_level.value
+                risk = (
+                    None
+                    if assessed.risk_level is None
+                    else assessed.risk_level.value
+                )
                 self._persist_risk_snapshot(
                     job_id=job_id,
                     frame_index=processed - 1,
@@ -486,13 +485,15 @@ class VideoProcessingService:
                     risk_level=risk,
                     original=original,
                     assessed=assessed,
+                    pending=pending_snapshots,
                 )
                 self.repository.append_frame_result(
                     job_id,
-                    FrameRiskResult(
+                FrameRiskResult(
                         frame_number=processed,
                         timestamp_seconds=timestamp_seconds,
                         risk_level=risk,
+                        assessment_status=assessed.assessment_status,
                     ),
                 )
                 segment = segment_recorder.accept(
@@ -505,8 +506,11 @@ class VideoProcessingService:
                 )
                 if segment is not None:
                     self._append_segment(job_id, segment)
-                counts[risk] += 1
-                if max_risk is None or RISK_SEVERITY[risk] > RISK_SEVERITY[max_risk]:
+                if risk is not None:
+                    counts[risk] += 1
+                if risk is not None and (
+                    max_risk is None or RISK_SEVERITY[risk] > RISK_SEVERITY[max_risk]
+                ):
                     max_risk = risk
                 elapsed = max(perf_counter() - started_clock, 1e-9)
                 progress = (
@@ -540,8 +544,14 @@ class VideoProcessingService:
                     progress,
                 )
 
+                if len(pending_snapshots) >= 32:
+                    self._flush_snapshot_batch(pending_snapshots)
+                    pending_snapshots.clear()
+
             if processed == 0:
                 raise ValueError("uploaded video contains no readable frames")
+            self._flush_snapshot_batch(pending_snapshots)
+            pending_snapshots.clear()
             final_segment = segment_recorder.finish()
             if final_segment is not None:
                 self._append_segment(job_id, final_segment)
@@ -626,41 +636,42 @@ class VideoProcessingService:
         job_id: str,
         frame_index: int,
         timestamp_seconds: float,
-        risk_level: RiskLevelValue,
+        risk_level: RiskLevelValue | None,
         original: NDArray[np.uint8],
         assessed: ProcessedFrame,
+        pending: list[RiskSnapshotRecord] | None = None,
     ) -> None:
         history = self.history_service
         root = self.snapshot_evidence_root
-        if history is None or root is None:
-            return
-        if not history.should_capture_snapshot(
-            job_id,
-            timestamp_sec=timestamp_seconds,
-            risk_level=risk_level,
-        ):
-            return
-        if assessed.pseudo_bev_bgr is None:
-            LOGGER.warning(
-                "=== WARNING | SNAPSHOT_EVIDENCE_MISSING | JOB_ID=%s | FRAME=%s ===",
-                job_id,
-                frame_index,
-            )
+        if history is None:
             return
         snapshot_id = uuid4().hex
+        # Every processed video frame gets image evidence. The database record
+        # and its files therefore stay in sync; cooldown sampling is no longer
+        # used to decide whether a frame image is written.
+        capture_evidence = root is not None
         relative_root = Path(job_id) / "snapshots" / snapshot_id
-        output_root = root / relative_root
+        output_root = None if root is None else root / relative_root
+        evidence_paths: dict[str, str | None] = {
+            "evidence_path": None,
+            "rgb_evidence_path": None,
+            "pseudo_bev_path": None,
+        }
         try:
-            output_root.mkdir(parents=True, exist_ok=False)
-            original_path = output_root / "original.png"
-            rgb_path = output_root / "rgb.png"
-            pseudo_bev_path = output_root / "pseudo_bev.png"
-            _write_png(original_path, original)
-            _write_png(rgb_path, assessed.annotated_bgr)
-            _write_png(pseudo_bev_path, assessed.pseudo_bev_bgr)
-            url_root = "/evidence/" + relative_root.as_posix()
-            history.persist_snapshot(
-                RiskSnapshotRecord(
+            if capture_evidence and output_root is not None:
+                output_root.mkdir(parents=True, exist_ok=False)
+                original_path = output_root / "original.png"
+                rgb_path = output_root / "rgb.png"
+                _write_png(original_path, original)
+                _write_png(rgb_path, assessed.annotated_bgr)
+                url_root = "/evidence/" + relative_root.as_posix()
+                evidence_paths["evidence_path"] = f"{url_root}/{original_path.name}"
+                evidence_paths["rgb_evidence_path"] = f"{url_root}/{rgb_path.name}"
+                if assessed.pseudo_bev_bgr is not None:
+                    pseudo_bev_path = output_root / "pseudo_bev.png"
+                    _write_png(pseudo_bev_path, assessed.pseudo_bev_bgr)
+                    evidence_paths["pseudo_bev_path"] = f"{url_root}/{pseudo_bev_path.name}"
+            record = RiskSnapshotRecord(
                     snapshot_id=snapshot_id,
                     job_id=job_id,
                     frame_index=frame_index,
@@ -669,16 +680,75 @@ class VideoProcessingService:
                     confidence=assessed.confidence,
                     assessment_reliable=assessed.assessment_reliable,
                     quality_reasons=assessed.quality_reasons,
+                    assessment_status=assessed.assessment_status,
+                    evidence_path=evidence_paths["evidence_path"],
+                    rgb_evidence_path=evidence_paths["rgb_evidence_path"],
+                    pseudo_bev_path=evidence_paths["pseudo_bev_path"],
+                    created_at=datetime.now(UTC),
+                )
+            if pending is not None:
+                pending.append(record)
+            else:
+                history.persist_snapshot(record)
+        except Exception as error:
+            LOGGER.exception(
+                "=== ERROR | OPERATION=PERSIST_SNAPSHOT_EVIDENCE | "
+                "JOB_ID=%s | FRAME=%s | ERROR_TYPE=%s ===",
+                job_id,
+                frame_index,
+                type(error).__name__,
+            )
+
+    def _flush_snapshot_batch(self, records: list[RiskSnapshotRecord]) -> None:
+        if self.history_service is None or not records:
+            return
+        self.history_service.persist_snapshots(records)
+
+    def _persist_safe_no_load_frame(
+        self,
+        *,
+        job_id: str,
+        frame_index: int,
+        timestamp_seconds: float,
+        original: NDArray[np.uint8],
+        assessed: ProcessedFrame,
+    ) -> None:
+        """Save person-only SAFE evidence as a normal history record."""
+        history = self.history_service
+        root = self.snapshot_evidence_root
+        if history is None or root is None:
+            return
+        snapshot_id = uuid4().hex
+        relative_root = Path(job_id) / "safe_no_load" / snapshot_id
+        output_root = root / relative_root
+        try:
+            output_root.mkdir(parents=True, exist_ok=False)
+            original_path = output_root / "original.png"
+            rgb_path = output_root / "rgb.png"
+            _write_png(original_path, original)
+            _write_png(rgb_path, assessed.annotated_bgr)
+            url_root = "/evidence/" + relative_root.as_posix()
+            history.persist_snapshot(
+                RiskSnapshotRecord(
+                    snapshot_id=snapshot_id,
+                    job_id=job_id,
+                    frame_index=frame_index,
+                    timestamp_sec=timestamp_seconds,
+                    risk_level="SAFE",
+                    assessment_status="SAFE_NO_LOAD",
+                    confidence=assessed.confidence,
+                    assessment_reliable=assessed.assessment_reliable,
+                    quality_reasons=assessed.quality_reasons,
                     evidence_path=f"{url_root}/{original_path.name}",
                     rgb_evidence_path=f"{url_root}/{rgb_path.name}",
-                    pseudo_bev_path=f"{url_root}/{pseudo_bev_path.name}",
+                    pseudo_bev_path=None,
                     created_at=datetime.now(UTC),
                 )
             )
         except Exception as error:
             LOGGER.exception(
-                "=== ERROR | OPERATION=PERSIST_SNAPSHOT_EVIDENCE | "
-                "JOB_ID=%s | FRAME=%s | ERROR_TYPE=%s ===",
+                "=== ERROR | OPERATION=PERSIST_SAFE_NO_LOAD | JOB_ID=%s | "
+                "FRAME=%s | ERROR_TYPE=%s ===",
                 job_id,
                 frame_index,
                 type(error).__name__,
