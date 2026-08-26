@@ -1,3 +1,4 @@
+import pytest
 from geometry_engine.config import FarthestPointSamplingConfig
 from geometry_engine.contracts import ImagePoint, LoadAnchorCandidate
 from geometry_engine.farthest_point_sampling import select_farthest_load_anchors
@@ -72,6 +73,17 @@ def test_stops_when_minimum_distance_cannot_be_met():
 
 def test_empty_candidates_return_empty_tuple():
     assert select_farthest_load_anchors([]) == ()
+
+
+def test_rejects_partial_selection_below_minimum_anchor_count():
+    candidate = make_candidate(5.0, 0.0, "only")
+
+    assert select_farthest_load_anchors([candidate]) == ()
+
+
+def test_minimum_anchor_count_cannot_exceed_maximum():
+    with pytest.raises(ValueError, match="minimum_anchors must not exceed"):
+        FarthestPointSamplingConfig(minimum_anchors=3, maximum_anchors=2)
 
 
 def test_equal_distance_tie_break_is_independent_of_input_order():

@@ -20,6 +20,8 @@ connected_region:
   local_neighbor_depth_tolerance: 0.05
 
 farthest_point_sampling:
+  # A valid load footprint requires at least two distinct anchors.
+  minimum_anchors: 2
   maximum_anchors: 16
   minimum_distance: 0.0
 

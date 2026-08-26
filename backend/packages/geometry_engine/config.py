@@ -111,14 +111,24 @@ class ConnectedRegionConfig:
 class FarthestPointSamplingConfig:
     """Spatial coverage settings for final anchor selection."""
 
+    minimum_anchors: int = 2
     maximum_anchors: int = 16
     minimum_distance: float = 0.0
 
     def __post_init__(self) -> None:
         _require_positive_int(
+            "farthest_point_sampling.minimum_anchors",
+            self.minimum_anchors,
+        )
+        _require_positive_int(
             "farthest_point_sampling.maximum_anchors",
             self.maximum_anchors,
         )
+        if self.minimum_anchors > self.maximum_anchors:
+            raise ValueError(
+                "farthest_point_sampling.minimum_anchors must not exceed "
+                "maximum_anchors"
+            )
         _require_non_negative(
             "farthest_point_sampling.minimum_distance",
             self.minimum_distance,

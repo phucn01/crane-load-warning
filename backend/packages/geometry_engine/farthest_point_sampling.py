@@ -19,7 +19,8 @@ def select_farthest_load_anchors(
     Selection starts at the candidate closest to the representative seed depth.
     Every later anchor maximizes its minimum image-space distance to the anchors
     already selected. Selection stops at ``maximum_anchors`` or when no remaining
-    candidate satisfies ``minimum_distance``.
+    candidate satisfies ``minimum_distance``. A partial result below
+    ``minimum_anchors`` is rejected instead of fabricating load anchors.
     """
 
     settings = config or FarthestPointSamplingConfig()
@@ -64,6 +65,8 @@ def select_farthest_load_anchors(
         selected_anchors.append(next_candidate)
         remaining_candidates.remove(next_candidate)
 
+    if len(selected_anchors) < settings.minimum_anchors:
+        return ()
     return tuple(selected_anchors)
 
 
