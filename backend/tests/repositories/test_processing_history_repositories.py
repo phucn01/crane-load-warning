@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -169,6 +170,40 @@ def test_snapshot_cooldown_and_escalation() -> None:
     assert not policy.should_capture("job", timestamp_sec=2.5, risk_level="DANGER")
     assert policy.should_capture("job", timestamp_sec=3.1, risk_level="DANGER")
     assert not policy.should_capture("other", timestamp_sec=0.0, risk_level="SAFE")
+
+
+def test_safe_no_load_image_is_persisted_as_frame_assessment(repositories) -> None:  # type: ignore[no-untyped-def]
+    jobs, snapshots = repositories
+    job = jobs.create(_job(media_type="image"))
+    service = ProcessingHistoryService(jobs, snapshots)
+    response = SimpleNamespace(
+        assessment_status="SAFE_NO_LOAD",
+        assessment=SimpleNamespace(
+            risk_level="SAFE",
+            assessment_reliable=True,
+            quality_reasons=["safe_no_load"],
+            pairs=[],
+        ),
+        evidence=SimpleNamespace(
+            rgb_url="/evidence/image/rgb.png",
+            pseudo_bev_url=None,
+        ),
+    )
+
+    persisted = service.persist_image_snapshot(
+        job.job_id,
+        response,  # type: ignore[arg-type]
+        original_evidence_path="/uploads/images/crane.png",
+    )
+    records, total = snapshots.list(job_id=job.job_id)
+
+    assert persisted is True
+    assert total == 1
+    assert records[0].risk_level == "SAFE"
+    assert records[0].assessment_status == "SAFE_NO_LOAD"
+    assert records[0].assessment_reliable is True
+    assert records[0].quality_reasons == ("safe_no_load",)
+    assert records[0].pseudo_bev_path is None
 
 
 def test_persistence_failure_is_best_effort() -> None:

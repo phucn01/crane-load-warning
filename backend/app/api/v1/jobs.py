@@ -165,7 +165,7 @@ def get_result(
 def get_image_evidence(
     job_id: str,
     history: ProcessingHistoryServiceDep,
-) -> dict[str, str | None]:
+) -> dict[str, object]:
     """Return all review views for a persisted image job."""
     job = history.jobs.get(job_id)
     if job is None or job.media_type != "image":
@@ -178,11 +178,37 @@ def get_image_evidence(
     output = "/" + output.lstrip("/")
     evidence_root = output.rsplit("/", 1)[0]
     input_name = job.input_path.name if job.input_path is not None else None
+    snapshots, _ = history.snapshots.list(job_id=job_id, limit=1)
+    assessment = snapshots[0] if snapshots else None
     return {
-        "original_url": None if input_name is None else f"/uploads/images/{input_name}",
-        "detection_url": f"{evidence_root}/rgb.png",
-        "bev_url": f"{evidence_root}/pseudo_bev.png",
+        "original_url": (
+            assessment.evidence_path
+            if assessment is not None and assessment.evidence_path is not None
+            else None if input_name is None else f"/uploads/images/{input_name}"
+        ),
+        "detection_url": (
+            assessment.rgb_evidence_path
+            if assessment is not None and assessment.rgb_evidence_path is not None
+            else f"{evidence_root}/rgb.png"
+        ),
+        "bev_url": (
+            assessment.pseudo_bev_path
+            if assessment is not None
+            else f"{evidence_root}/pseudo_bev.png"
+        ),
         "combined_url": output,
+        "risk_level": assessment.risk_level if assessment is not None else job.max_risk_level,
+        "assessment_status": (
+            assessment.assessment_status
+            if assessment is not None
+            else "FULL_EVALUATION"
+        ),
+        "assessment_reliable": (
+            assessment.assessment_reliable if assessment is not None else None
+        ),
+        "quality_reasons": (
+            list(assessment.quality_reasons) if assessment is not None else []
+        ),
     }
 
 

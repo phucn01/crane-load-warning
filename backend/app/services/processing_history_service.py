@@ -205,12 +205,6 @@ class ProcessingHistoryService:
         original_evidence_path: str | None = None,
     ) -> bool:
         level = response.assessment.risk_level
-        if not self.should_capture_snapshot(
-            job_id,
-            timestamp_sec=0.0,
-            risk_level=level,
-        ):
-            return False
         confidence = max(
             (pair.confidence for pair in response.assessment.pairs),
             default=None,
@@ -222,7 +216,7 @@ class ProcessingHistoryService:
                 frame_index=None,
                 timestamp_sec=None,
                 risk_level=level,  # type: ignore[arg-type]
-                assessment_status="FULL_EVALUATION",
+                assessment_status=response.assessment_status,
                 confidence=confidence,
                 assessment_reliable=response.assessment.assessment_reliable,
                 quality_reasons=tuple(response.assessment.quality_reasons),

@@ -1,6 +1,7 @@
 import type {
   ImageDetectionResponse,
   ProcessingJobHistoryPage,
+  RiskLevel,
   RiskSnapshotHistoryPage,
   VideoJob,
   VideoJobCreated,
@@ -146,6 +147,10 @@ export interface ImageEvidenceViews {
   detection_url: string | null;
   bev_url: string | null;
   combined_url: string | null;
+  risk_level: RiskLevel | null;
+  assessment_status: string;
+  assessment_reliable: boolean | null;
+  quality_reasons: string[];
 }
 
 export async function getImageEvidence(

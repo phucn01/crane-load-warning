@@ -753,6 +753,9 @@ footer {
 .frame-evidence-views figcaption span { color: var(--ink); font-size: 11px; font-weight: 750; }
 .frame-evidence-views figcaption a { color: var(--accent); font-size: 10px; font-weight: 750; text-decoration: none; white-space: nowrap; }
 .snapshot-review-stage { padding-inline: 28px; }
+.image-review-assessment { margin-bottom: 22px; }
+.image-review-assessment .reliability-row { margin-top: 0; }
+.image-review-assessment .quality-block { margin-top: 16px; }
 .snapshot-view-missing { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; }
 .frame-evidence-nav { position: fixed; top: 50%; width: 44px; height: 64px; transform: translateY(-50%); font-size: 34px; line-height: 1; }
 .frame-evidence-previous { left: max(30px, calc((100vw - 1500px) / 2 - 56px)); }
